@@ -21,8 +21,11 @@ export const MODULES: ShowcaseModule[] = [
   { id: 'client', label: 'Client', kind: 'feature', blurb: 'Config validation, namespaces, raw commands, health, shutdown.',
     ops: [
       { id: 'health', label: 'health()' },
-      { id: 'raw', label: 'raw commands' },
+      { id: 'validate', label: 'config validation' },
       { id: 'collide', label: 'namespace collision' },
+      { id: 'with', label: 'with*() overrides' },
+      { id: 'raw', label: 'raw commands' },
+      { id: 'shutdown', label: 'shutdown' },
     ] },
   { id: 'session', label: 'Session', kind: 'feature', blurb: 'Opaque credentials, rotation chains, replay, revoke, expiry.',
     ops: ['create', 'validate', 'get', 'touch', 'update', 'rotate', 'revoke', 'destroy', 'setSecurityVersion', 'revokeAll', 'list'].map((id) => ({ id, label: id })) },
@@ -97,13 +100,6 @@ export function runOp(mode: Mode, moduleId: string, opId: string, v: Values, sta
   if (!status.available) return fail(503, 'MODE_UNAVAILABLE', 'ModeUnavailableError', `${mode} is unavailable`);
 
   switch (`${moduleId}.${opId}`) {
-    case 'client.collide': {
-      const a = String(v.cache), c = String(v.sessions);
-      const collide = a === c || a.startsWith(`${c}:`) || c.startsWith(`${a}:`);
-      return collide
-        ? fail(500, 'REDIS_CONFIGURATION', 'RedisConfigurationError', `Namespaces "${c}" (sessions) and "${a}" (cache) overlap`)
-        : ok({ created: true, config: { cache: { namespace: a }, sessions: { namespace: c } } }, [], []);
-    }
     case 'session.create': {
       if (String(v.metadata).length > 200) return fail(413, 'SESSION_LIMIT', 'SessionLimitError', 'metadata exceeds maxMetadataBytes (8192)');
       const u = 'a3f9…c21e';

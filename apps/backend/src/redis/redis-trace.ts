@@ -30,11 +30,11 @@ export interface TraceRecording {
 const storage = new AsyncLocalStorage<{ sent: Map<Command, Sent>; open: boolean }>();
 
 // Keyed by command, so a command ioredis sends again (from the offline queue, or after a MOVED) is listed once, with
-// the node it finally went to.
+// the node it finally went to. A command on a closed connection is left out: ioredis rejects it without sending it.
 const sendCommand = Redis.prototype.sendCommand;
 Redis.prototype.sendCommand = function (this: Redis, command, stream) {
   const recording = storage.getStore();
-  if (recording?.open) recording.sent.set(command, { command, node: address(this) });
+  if (recording?.open && this.status !== 'end') recording.sent.set(command, { command, node: address(this) });
   return sendCommand.call(this, command, stream);
 };
 

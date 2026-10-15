@@ -149,6 +149,55 @@ export const ClientRawRequestSchema = z.discriminatedUnion('command', [
   z.object({ command: z.literal('deletePatternClusterAware'), pattern: z.string() }),
 ]);
 
+/**
+ * A whole `createRedisClient` config, on a temporary client. Only the shape is checked here: the package validates it.
+ * The backend adds `lazyConnect: true`, so a config the package accepts is closed before it connects anywhere.
+ */
+export const ClientValidateRequestSchema = z.object({ config: z.record(z.string(), z.json()) });
+
+/** A temporary client on this mode with cache and sessions enabled under these namespaces. */
+export const ClientCollideRequestSchema = z.object({ cache: z.string(), sessions: z.string() });
+
+/** The `with*()` methods, and the config section each one changes. */
+export const CLIENT_WITH_METHODS = {
+  withCache: 'cache',
+  withLock: 'lock',
+  withRateLimit: 'rateLimit',
+  withPubSub: 'pubsub',
+  withStreams: 'streams',
+  withSessions: 'sessions',
+} as const;
+
+/**
+ * One `with*()` override on a temporary client configured like the mode client, optionally while a Pub/Sub subscription
+ * is live. After `withCache`, the client also runs `cache.set` without a ttl and reads that ttl back.
+ */
+export const ClientWithRequestSchema = z.object({
+  method: z.enum(Object.keys(CLIENT_WITH_METHODS) as [keyof typeof CLIENT_WITH_METHODS]),
+  options: z.record(z.string(), z.json()),
+  /** Pass `'replace'` instead of the default `'merge'`. */
+  replace: z.boolean(),
+  /** Subscribe first, so the override meets a live subscription. */
+  whileSubscribed: z.boolean(),
+});
+
+/**
+ * `close()` on a temporary client, optionally while it has a live subscription and a stream read blocked in Redis, then
+ * what still works; `closeTwice` calls `close()` again at the end.
+ */
+export const ClientShutdownRequestSchema = z.object({ liveWork: z.boolean(), closeTwice: z.boolean() });
+
+/** One call a temporary-client demo made, in order: what it returned (if anything), or what it threw. */
+export const ClientStepSchema = z.discriminatedUnion('ok', [
+  z.object({ call: z.string(), ok: z.literal(true), value: z.unknown().optional() }),
+  z.object({
+    call: z.string(),
+    ok: z.literal(false),
+    error: z.object({ code: z.string().optional(), name: z.string(), message: z.string() }),
+  }),
+]);
+export type ClientStep = z.infer<typeof ClientStepSchema>;
+
 /* ───────────── errors: every non-2xx response ───────────── */
 
 export const ErrorBodySchema = z.object({
