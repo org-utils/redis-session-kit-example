@@ -1,5 +1,10 @@
-import { redirect } from 'next/navigation';
+import { Suspense } from 'react';
+import { ShowcaseShell } from '@/components/showcase/showcase-shell';
 
 export default function Home() {
-  redirect('/prototype/ui-shell');
+  return (
+    <Suspense>
+      <ShowcaseShell />
+    </Suspense>
+  );
 }

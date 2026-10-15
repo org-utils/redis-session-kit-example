@@ -1,10 +1,10 @@
-// PROTOTYPE: an in-memory stand-in for ioredis-toolkit sessions, following docs/STATE-MACHINE.md at v1.1.2
+// Mock sessions: an in-memory stand-in for ioredis-toolkit sessions, following docs/STATE-MACHINE.md at v1.1.2
 // closely enough to demo the lifecycle. One store per connection mode. Not the package; not accurate to the byte.
 'use client';
 
 import { useCallback, useRef, useState } from 'react';
-import type { KeyTouched, Mode, RunResult } from './stub';
-import { nodeOf, slotOf } from './stub';
+import type { KeyTouched, Mode, RunResult } from './mock-backend';
+import { nodeOf, slotOf } from './mock-backend';
 
 export type Status = 'active' | 'consumed' | 'revoked';
 export type Reason = 'not_found' | 'expired' | 'idle_timeout' | 'absolute_timeout' | 'revoked' | 'consumed' | 'invalid';

@@ -1,9 +1,10 @@
-// PROTOTYPE variant A: shadcn Sidebar app, one mode at a time, compare toggle, right-hand Redis state rail, collapsible event log.
+// The showcase shell: an icon-first sidebar (modes, feature modules, mode-specific modules), one mode at a time with an
+// opt-in compare across modes, a right-hand Redis-state panel and one collapsible event log for all modes.
 'use client';
 
 import { ChevronsUpDown, Database, Play } from 'lucide-react';
 import { useSearchParams } from 'next/navigation';
-import { useEffect, useRef, useState } from 'react';
+import { useState } from 'react';
 import { ThemeToggle } from '@/components/theme-toggle';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -19,20 +20,16 @@ import {
 } from '@/components/ui/sidebar';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { cn } from '@/lib/utils';
-import { CliSnippet, Commands, HttpBadge, InsightLink, Json, KeysTable, ModeName } from './bits';
-import { spec, type Values } from './examples';
-import { EXAMPLE_LAYOUTS, RequestForm } from './request-form';
-import { SESSION_VARIANTS } from './session-section';
-import { useSessionLab } from './session-sim';
-import { PrototypeSwitcher } from '@/components/prototype-switcher';
-import { MODES, MODE_ICON, MODULES, MODULE_ICON, healthDot, healthText, modeText, runOp, useStubLive, type Mode, type RunResult } from './stub';
+import { spec, type Values } from '@/lib/showcase/examples';
+import { MODES, MODE_ICON, MODULES, MODULE_ICON, healthDot, healthText, modeText, runOp, useStubLive, type Mode, type RunResult } from '@/lib/showcase/mock-backend';
+import { useSessionLab } from '@/lib/showcase/mock-sessions';
+import { RequestForm } from './request-form';
+import { CliSnippet, Commands, HttpBadge, InsightLink, Json, KeysTable, ModeName } from './result-display';
+import { SessionSection } from './session-section';
 
-export const name = 'Sidebar, one mode at a time';
-
-export function VariantA() {
-  // PROTOTYPE: ?sidebar=closed starts collapsed, for screenshots of icon mode.
+export function ShowcaseShell() {
+  // ?module=<id> opens a section directly.
   const params = useSearchParams();
-  const startOpen = params.get('sidebar') !== 'closed';
   const { status, events, simulateFailover } = useStubLive();
   const [mode, setMode] = useState<Mode>('standalone');
   const [moduleId, setModuleId] = useState(MODULES.some((m) => m.id === params.get('module')) ? params.get('module')! : 'cache');
@@ -51,22 +48,6 @@ export function VariantA() {
   const [compare, setCompare] = useState(false);
   const [results, setResults] = useState<RunResult[]>([]);
   const lab = useSessionLab(mode);
-  const sessionKey = params.get('session') ?? '1';
-  const SessionVariant = (SESSION_VARIANTS.find((v) => v.key === sessionKey) ?? SESSION_VARIANTS[0]).C;
-  // PROTOTYPE: ?seed=1 plays a short scene on load (for screenshots and a quick look at a busy board).
-  const labRef = useRef(lab); labRef.current = lab;
-  const seeded = useRef(false);
-  useEffect(() => {
-    if (params.get('seed') !== '1' || moduleId !== 'session' || seeded.current) return;
-    seeded.current = true;
-    const ex = (op: string, id: string) => spec('session', op).examples.find((e) => e.id === id)!.values;
-    const steps: Array<[string, Values]> = [
-      ['create', ex('create', 'browser')], ['touch', ex('touch', 'touch')], ['update', ex('update', 'theme')],
-      ['rotate', ex('rotate', 'current')], ['create', ex('create', 'phone')], ['create', ex('create', 'idle')],
-      ['rotate', ex('rotate', 'replay')],
-    ];
-    steps.forEach(([op, v], n) => setTimeout(() => setResults([labRef.current.run(op, v)]), 80 * (n + 1)));
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const pickModule = (id: string) => {
     const m = MODULES.find((x) => x.id === id)!;
@@ -78,7 +59,7 @@ export function VariantA() {
   const s = status[focus?.mode ?? mode];
 
   return (
-    <SidebarProvider defaultOpen={startOpen}>
+    <SidebarProvider>
       <Sidebar collapsible="icon">
         <SidebarHeader>
           <SidebarMenu>
@@ -173,7 +154,7 @@ export function VariantA() {
                 <p className="text-sm text-muted-foreground">{mod.blurb}</p>
               </div>
               {moduleId === 'session' ? (
-                <SessionVariant mode={mode} lab={lab} last={results[0] ?? null} onResult={(r) => setResults([r])} />
+                <SessionSection mode={mode} lab={lab} last={results[0] ?? null} onResult={(r) => setResults([r])} />
               ) : (<>
               <Tabs value={op.id} onValueChange={(v) => loadOp(moduleId, v)}>
                 <TabsList variant="line">
@@ -260,7 +241,6 @@ export function VariantA() {
           </CollapsibleContent>
         </Collapsible>
       </SidebarInset>
-      <PrototypeSwitcher param="examples" variants={EXAMPLE_LAYOUTS} />
     </SidebarProvider>
   );
 }

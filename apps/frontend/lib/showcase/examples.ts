@@ -1,5 +1,5 @@
-// PROTOTYPE: built-in, editable examples per operation, with the fields each form shows and the
-// equivalent ioredis-toolkit call. A first draft of every section's demo scenarios.
+// Built-in, editable examples per operation, with the fields each form shows and the equivalent
+// ioredis-toolkit call. Still a draft for the non-session sections (see the Examples ticket on the map).
 
 export type Value = string | number | boolean;
 export type Values = Record<string, Value>;
