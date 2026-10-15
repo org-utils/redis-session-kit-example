@@ -2,7 +2,7 @@
   "name": "ioredis-toolkit-showcase",
   "private": true,
   "license": "MIT",
-  "packageManager": "pnpm@11.5.1",
+  "packageManager": "pnpm@12.11.2",
   "engines": {
     "node": ">=24"
   },

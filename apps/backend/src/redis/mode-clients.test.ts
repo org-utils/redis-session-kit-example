@@ -10,7 +10,7 @@ after(() => closeModeClients(clients));
 for (const [mode, client] of clients) {
   test(`${mode}: health() answers healthy`, async () => {
     const health = await client.health({ timeoutMs: 2000, degradedMs: 1000 });
-    assert.equal(health.status, 'healthy', health.error);
+    assert.equal(health.status, 'healthy', health.error ?? health.status);
   });
 }
 
