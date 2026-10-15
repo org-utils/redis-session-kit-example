@@ -21,7 +21,7 @@ import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { cn } from '@/lib/utils';
 import { CliSnippet, Commands, HttpBadge, InsightLink, Json, KeysTable, ModeName } from './bits';
 import { spec, type Values } from './examples';
-import { ExamplePicker, RequestForm } from './request-form';
+import { EXAMPLE_LAYOUTS, RequestForm } from './request-form';
 import { SESSION_VARIANTS } from './session-section';
 import { useSessionLab } from './session-sim';
 import { PrototypeSwitcher } from '@/components/prototype-switcher';
@@ -180,9 +180,8 @@ export function VariantA() {
                   {mod.ops.map((o) => <TabsTrigger key={o.id} value={o.id} className="font-mono">{o.label}</TabsTrigger>)}
                 </TabsList>
               </Tabs>
-              <ExamplePicker examples={opSpec.examples} selected={modified ? null : exampleId}
-                onPick={(ex) => { setExampleId(ex.id); setValues(ex.values); }} />
               <RequestForm spec={opSpec} values={values} modified={modified} onChange={setValues}
+                selected={modified ? null : exampleId} onPick={(ex) => { setExampleId(ex.id); setValues(ex.values); }}
                 onReset={() => example && setValues(example.values)}
                 footer={<>
                   <Button onClick={run}><Play /> Run{compare ? ' on all modes' : ` on ${mode}`}</Button>
@@ -261,7 +260,7 @@ export function VariantA() {
           </CollapsibleContent>
         </Collapsible>
       </SidebarInset>
-      {moduleId === 'session' && <PrototypeSwitcher param="session" variants={SESSION_VARIANTS} />}
+      <PrototypeSwitcher param="examples" variants={EXAMPLE_LAYOUTS} />
     </SidebarProvider>
   );
 }

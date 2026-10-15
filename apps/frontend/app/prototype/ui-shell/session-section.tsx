@@ -15,7 +15,7 @@ import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { cn } from '@/lib/utils';
 import { HttpBadge, Json } from './bits';
 import { spec, type Values } from './examples';
-import { ExamplePicker, RequestForm, type TokenOption } from './request-form';
+import { RequestForm, type TokenOption } from './request-form';
 import { DEMO_CONFIG, type Rec, type Status, type Transition, type useSessionLab } from './session-sim';
 import type { Mode, RunResult } from './stub';
 
@@ -156,10 +156,10 @@ function SessionOps({ mode, lab, onResult, last }: SectionProps) {
       <Tabs value={op} onValueChange={setOp}>
         <TabsList variant="line" className="h-auto flex-wrap">{OPS.map((o) => <TabsTrigger key={o} value={o} className="font-mono">{o}</TabsTrigger>)}</TabsList>
       </Tabs>
-      <ExamplePicker examples={f.s.examples} selected={f.modified ? null : f.exampleId} onPick={(e) => { f.setExampleId(e.id); f.setValues(e.values); }} />
       <div className="grid grid-cols-1 gap-4 @5xl:grid-cols-[minmax(0,1fr)_22rem]">
         <div className="space-y-4">
           <RequestForm spec={f.s} values={f.values} modified={f.modified} onChange={f.setValues} tokens={tokenOptions(lab)}
+            selected={f.modified ? null : f.exampleId} onPick={(e) => { f.setExampleId(e.id); f.setValues(e.values); }}
             onReset={() => f.example && f.setValues(f.example.values)}
             footer={<Button onClick={() => onResult(lab.run(op, f.values))}><Play /> Run on {mode}</Button>} />
           <ResultCard r={last} />
@@ -251,6 +251,7 @@ function SessionWalkthrough({ mode, lab, onResult, last }: SectionProps) {
           <CardContent><p className="text-sm">{step.story}</p></CardContent>
         </Card>
         <RequestForm spec={s} values={values} modified={modified} onChange={setValues} tokens={tokenOptions(lab)} onReset={() => setValues(ex.values)}
+          selected={modified ? null : ex.id} onPick={(e) => setValues(e.values)}
           footer={<>
             <Button onClick={run}><Play /> Run step</Button>
             <Button variant="outline" disabled={i === STEPS.length - 1} onClick={() => setI(i + 1)}>Next <ArrowRight /></Button>
