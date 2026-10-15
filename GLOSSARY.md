@@ -16,6 +16,10 @@ _Avoid_: topology, deployment type, environment
 The single package client the backend holds for one connection mode, shared by every module running on that mode.
 _Avoid_: connection, redis instance, shared client
 
+**Temporary client**:
+A package client the client section creates for one request and closes before answering, so a demonstration that reconfigures or closes a client never touches a mode client.
+_Avoid_: scratch client, test client, throwaway client
+
 **Event log**:
 The recent record, per connection mode, of what happened in the background (failures the package reports outside any request, health changes, and on sentinel what Sentinel announces, such as a master switch), shown live in the showcase.
 _Avoid_: error log, activity feed, notifications
