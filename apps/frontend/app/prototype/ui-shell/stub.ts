@@ -56,12 +56,8 @@ export const MODULES: ShowcaseModule[] = [
       { id: 'collide', label: 'namespace collision' },
       { id: 'mget', label: 'raw mget' },
     ] },
-  { id: 'session', label: 'Session', kind: 'feature', blurb: 'Opaque credentials, rotation chains, replay, revoke.',
-    ops: [
-      { id: 'create', label: 'create' },
-      { id: 'rotate', label: 'rotate' },
-      { id: 'revokeAll', label: 'revokeAll' },
-    ] },
+  { id: 'session', label: 'Session', kind: 'feature', blurb: 'Opaque credentials, rotation chains, replay, revoke, expiry.',
+    ops: ['create', 'validate', 'get', 'touch', 'update', 'rotate', 'revoke', 'destroy', 'setSecurityVersion', 'revokeAll', 'list'].map((id) => ({ id, label: id })) },
   { id: 'cache', label: 'Cache', kind: 'feature', blurb: 'JSON values with TTL and conditional writes.',
     ops: [
       { id: 'set', label: 'set' },

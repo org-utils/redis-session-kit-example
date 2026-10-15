@@ -7,7 +7,7 @@ export type Values = Record<string, Value>;
 export interface Field {
   name: string;
   label: string;
-  kind: 'text' | 'json' | 'number' | 'boolean' | 'select';
+  kind: 'text' | 'json' | 'number' | 'boolean' | 'select' | 'token';
   options?: string[];
   help?: string;
 }
@@ -16,6 +16,7 @@ export interface OpSpec { fields: Field[]; examples: Example[]; call: (v: Values
 
 const q = (s: Value) => `'${s}'`;
 const json = (s: Value) => { try { return JSON.stringify(JSON.parse(String(s))); } catch { return String(s); } };
+const tok = (s: Value) => (s === '$cookie' ? 'cookieToken' : s === '$previous' ? 'previousToken' : q(s));
 const list = (s: Value) => String(s).split(',').map((x) => x.trim()).filter(Boolean);
 
 export const OPS: Record<string, OpSpec> = {
@@ -55,32 +56,93 @@ export const OPS: Record<string, OpSpec> = {
 
   'session.create': {
     fields: [
-      { name: 'userId', label: 'userId', kind: 'text' },
+      { name: 'userId', label: 'userId (fake login: any id)', kind: 'text' },
       { name: 'deviceId', label: 'deviceId', kind: 'text' },
+      { name: 'securityVersion', label: 'securityVersion', kind: 'number' },
       { name: 'metadata', label: 'metadata (JSON)', kind: 'json' },
+      { name: 'idleTimeout', label: 'idleTimeout (s, blank = config)', kind: 'number' },
+      { name: 'absoluteTimeout', label: 'absoluteTimeout (s, blank = config)', kind: 'number' },
     ],
     examples: [
-      { id: 'browser', title: 'Browser login', description: 'A user signs in; the cookie is set and the user\'s session set grows.', values: { userId: 'user-42', deviceId: 'laptop', metadata: '{ "plan": "pro" }' } },
-      { id: 'mobile', title: 'Second device', description: 'Same user on a phone: two sessions in one user\'s session set.', values: { userId: 'user-42', deviceId: 'phone', metadata: '{}' } },
-      { id: 'big', title: 'Metadata over the limit', description: 'More than maxMetadataBytes: SESSION_LIMIT.', values: { userId: 'user-42', deviceId: 'laptop', metadata: '{ "blob": "…9 KiB…" }' } },
+      { id: 'browser', title: 'Log in on a laptop', description: 'Fake login: no password. Sets this mode\'s cookie.', values: { userId: 'user-42', deviceId: 'laptop', securityVersion: 1, metadata: '{ "plan": "pro" }', idleTimeout: '', absoluteTimeout: '' } },
+      { id: 'phone', title: 'Same user on a phone', description: 'A second session in the user\'s session set.', values: { userId: 'user-42', deviceId: 'phone', securityVersion: 1, metadata: '{}', idleTimeout: '', absoluteTimeout: '' } },
+      { id: 'idle', title: 'Watch an idle timeout', description: 'idleTimeout 20 s: stop touching it and it fails with idle_timeout.', values: { userId: 'user-42', deviceId: 'kiosk', securityVersion: 1, metadata: '{}', idleTimeout: 20, absoluteTimeout: '' } },
+      { id: 'absolute', title: 'Watch an absolute timeout', description: 'absoluteTimeout 45 s: touching cannot save it.', values: { userId: 'user-42', deviceId: 'kiosk', securityVersion: 1, metadata: '{}', idleTimeout: '', absoluteTimeout: 45 } },
     ],
-    call: (v) => `await redis.sessions.create({ userId: ${q(v.userId)}, deviceId: ${q(v.deviceId)}, metadata: ${json(v.metadata)} })`,
+    call: (v) => `await redis.sessions.create({ userId: ${q(v.userId)}, deviceId: ${q(v.deviceId)}, securityVersion: ${v.securityVersion}, metadata: ${json(v.metadata)}${v.idleTimeout !== '' ? `, idleTimeout: ${v.idleTimeout}` : ''}${v.absoluteTimeout !== '' ? `, absoluteTimeout: ${v.absoluteTimeout}` : ''} })`,
+  },
+  'session.validate': {
+    fields: [{ name: 'token', label: 'token', kind: 'token' }],
+    examples: [
+      { id: 'cookie', title: 'Validate my cookie', description: '{ valid: true, session } or { valid: false, reason }. Never throws for a bad credential.', values: { token: '$cookie' } },
+      { id: 'old', title: 'Validate a replaced token', description: 'The token from before the last rotation answers consumed.', values: { token: '$previous' } },
+      { id: 'junk', title: 'A made-up token', description: 'not_found.', values: { token: 'j_fake.0000' } },
+    ],
+    call: (v) => `await redis.sessions.validate(${tok(v.token)})`,
+  },
+  'session.get': {
+    fields: [{ name: 'token', label: 'token', kind: 'token' }],
+    examples: [{ id: 'cookie', title: 'Get or throw', description: 'Same check as validate, but throws a typed Session*Error.', values: { token: '$cookie' } }],
+    call: (v) => `await redis.sessions.get(${tok(v.token)})`,
+  },
+  'session.touch': {
+    fields: [{ name: 'token', label: 'token', kind: 'token' }],
+    examples: [
+      { id: 'touch', title: 'Touch on a request', description: 'Extends the idle expiry; at most once per touchInterval (10 s).', values: { token: '$cookie' } },
+      { id: 'twice', title: 'Touch again straight away', description: 'Within touchInterval: no write, touched: false.', values: { token: '$cookie' } },
+    ],
+    call: (v) => `await redis.sessions.touch(${tok(v.token)})`,
+  },
+  'session.update': {
+    fields: [{ name: 'token', label: 'token', kind: 'token' }, { name: 'metadata', label: 'metadata patch (JSON)', kind: 'json' }, { name: 'expectedVersion', label: 'expectedVersion (blank = none)', kind: 'number' }],
+    examples: [
+      { id: 'theme', title: 'Save a preference', description: 'Bumps version. No expectedVersion: last write wins.', values: { token: '$cookie', metadata: '{ "theme": "dark" }', expectedVersion: '' } },
+      { id: 'cas', title: 'Optimistic update', description: 'With the current version (1 after login) it succeeds…', values: { token: '$cookie', metadata: '{ "theme": "light" }', expectedVersion: 1 } },
+      { id: 'stale', title: 'Stale version', description: '…run it twice: the second sees a newer version and gets SESSION_CONFLICT.', values: { token: '$cookie', metadata: '{ "theme": "light" }', expectedVersion: 1 } },
+    ],
+    call: (v) => `await redis.sessions.update(${tok(v.token)}, { metadata: ${json(v.metadata)} }${v.expectedVersion !== '' ? `, ${v.expectedVersion}` : ''})`,
   },
   'session.rotate': {
-    fields: [{ name: 'token', label: 'token', kind: 'text', help: 'defaults to this mode\'s session cookie' }],
+    fields: [{ name: 'token', label: 'token', kind: 'token' }],
     examples: [
-      { id: 'current', title: 'Rotate the current session', description: 'Creates a successor; the old session is consumed.', values: { token: '(cookie)' } },
-      { id: 'replay', title: 'Replay a consumed token', description: 'Presenting the predecessor again: SessionReplayError.', values: { token: '(previous token)' } },
+      { id: 'current', title: 'Rotate after privilege change', description: 'Consumes the session and creates its successor; the cookie moves on.', values: { token: '$cookie' } },
+      { id: 'replay', title: 'Replay the old token', description: 'Rotating the consumed predecessor: SessionReplayError. Nothing else ends.', values: { token: '$previous' } },
     ],
-    call: (v) => `await redis.sessions.rotate(${v.token === '(cookie)' ? 'cookieToken' : q(v.token)})`,
+    call: (v) => `await redis.sessions.rotate(${tok(v.token)})`,
+  },
+  'session.revoke': {
+    fields: [{ name: 'token', label: 'token', kind: 'token' }],
+    examples: [
+      { id: 'logout', title: 'Log out', description: 'Revokes the session; it answers revoked until its tombstone expires (≤ 300 s).', values: { token: '$cookie' } },
+      { id: 'stale', title: 'Log out with a stale cookie', description: 'Revoking a consumed token follows the rotation chain and revokes its end.', values: { token: '$previous' } },
+    ],
+    call: (v) => `await redis.sessions.revoke(${tok(v.token)})`,
+  },
+  'session.destroy': {
+    fields: [{ name: 'token', label: 'token', kind: 'token' }],
+    examples: [{ id: 'destroy', title: 'Delete outright', description: 'No tombstone: the credential answers not_found right away.', values: { token: '$cookie' } }],
+    call: (v) => `await redis.sessions.destroy(${tok(v.token)})`,
+  },
+  'session.setSecurityVersion': {
+    fields: [{ name: 'userId', label: 'userId', kind: 'text' }, { name: 'version', label: 'version', kind: 'number' }],
+    examples: [
+      { id: 'reset', title: 'Password reset', description: 'Bump to 2: every session created with 1 now validates as invalid.', values: { userId: 'user-42', version: 2 } },
+      { id: 'bad', title: 'Not a whole number', description: '1.5 is rejected: SESSION_INVALID.', values: { userId: 'user-42', version: 1.5 } },
+    ],
+    call: (v) => `await redis.sessions.setSecurityVersion(${q(v.userId)}, ${v.version})`,
   },
   'session.revokeAll': {
     fields: [{ name: 'userId', label: 'userId', kind: 'text' }, { name: 'limit', label: 'limit', kind: 'number' }],
     examples: [
-      { id: 'all', title: 'Log out everywhere', description: 'Ends every session in the user\'s session set.', values: { userId: 'user-42', limit: 200 } },
-      { id: 'batch', title: 'In batches of 1', description: 'Shows { affected, remaining } across repeated calls.', values: { userId: 'user-42', limit: 1 } },
+      { id: 'all', title: 'Log out everywhere', description: 'Deletes the user\'s sessions (no tombstones): they answer not_found.', values: { userId: 'user-42', limit: 200 } },
+      { id: 'batch', title: 'One at a time', description: 'limit 1: watch { affected, remaining } count down.', values: { userId: 'user-42', limit: 1 } },
     ],
     call: (v) => `await redis.sessions.revokeAll(${q(v.userId)}, ${v.limit})`,
+  },
+  'session.list': {
+    fields: [{ name: 'userId', label: 'userId', kind: 'text' }],
+    examples: [{ id: 'list', title: 'My devices', description: 'Live sessions in the user\'s session set, expired ones left out.', values: { userId: 'user-42' } }],
+    call: (v) => `await redis.sessions.list(${q(v.userId)}, 0, 50)`,
   },
 
   'cache.set': {
