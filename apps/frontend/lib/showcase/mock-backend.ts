@@ -89,9 +89,9 @@ export const MODULES: ShowcaseModule[] = [
       { id: 'ack', label: 'ack' },
     ] },
   { id: 'failover', label: 'Failover', kind: 'mode-specific', onlyMode: 'sentinel', blurb: 'Move the master 6380 → 6381 and watch.',
-    ops: [{ id: 'failover', label: 'SENTINEL FAILOVER' }] },
+    ops: [{ id: 'drill', label: 'failover drill' }] },
   { id: 'slots', label: 'Slots', kind: 'mode-specific', onlyMode: 'cluster', blurb: 'Key → hash slot → node, hash tags, fan-out.',
-    ops: [{ id: 'keyslot', label: 'key → slot' }] },
+    ops: [{ id: 'inspect', label: 'key inspector' }] },
 ];
 
 // Real CRC16/XMODEM so the cluster stub shows believable slots.
@@ -211,12 +211,6 @@ export function runOp(mode: Mode, moduleId: string, opId: string, v: Values, sta
       if (v.group === 'ghost') return fail(502, 'NOGROUP', 'ReplyError', "NOGROUP No such key 'showcase:stream:orders' or consumer group 'ghost'", ['XREADGROUP …']);
       return ok([{ id: '1760541600000-0', fields: { orderId: '42', type: 'created' } }], [k(`showcase:stream:${v.stream}`, 'stream', null)],
         [`XREADGROUP GROUP ${v.group} ${v.consumer} COUNT ${v.count} BLOCK 1000 STREAMS showcase:stream:${v.stream} ${v.pending ? '0' : '>'}`]);
-    case 'failover.failover':
-      return ok({ accepted: true, from: '127.0.0.1:6380', to: '127.0.0.1:6381' }, [], [`SENTINEL FAILOVER ${v.master}`], 202);
-    case 'slots.keyslot': {
-      const key = String(v.key), slot = slotOf(key);
-      return ok({ key, hashTag: key.match(/\{(.+?)\}/)?.[1] ?? null, slot, node: nodeOf(slot) }, [], [`CLUSTER KEYSLOT ${key}`]);
-    }
     default:
       return ok({ ok: true, note: 'stubbed' }, [], [`(${moduleId}.${opId})`]);
   }
@@ -233,7 +227,7 @@ const AMBIENT: Array<Omit<ShowcaseEvent, 'id' | 'at' | 'ts'>> = [
   { mode: 'sentinel', kind: 'error', text: 'lock-release: release of job:42 failed (token mismatch)' },
 ];
 
-/** Stub for the /api/events SSE stream plus status, with a fake failover. */
+/** Stub for the /api/events SSE stream plus status. */
 export function useStubLive() {
   const [status, setStatus] = useState(INITIAL_STATUS);
   const [events, setEvents] = useState<ShowcaseEvent[]>([]);
@@ -246,25 +240,8 @@ export function useStubLive() {
     return () => clearInterval(t);
   }, []);
 
-  const simulateFailover = () => {
-    const set = (patch: Partial<ModeStatus>) => setStatus((s) => ({ ...s, sentinel: { ...s.sentinel, ...patch } }));
-    push({ mode: 'sentinel', kind: 'health', text: 'SENTINEL FAILOVER mymaster requested' });
-    set({ health: 'degraded', latencyMs: 380, failoverReady: false });
-    setTimeout(() => {
-      push({ mode: 'sentinel', kind: 'error', text: 'connection: All sentinels are unreachable. Retrying from scratch after 10ms.' });
-      set({ health: 'unhealthy', latencyMs: 1000 });
-    }, 900);
-    setTimeout(() => {
-      push({ mode: 'sentinel', kind: 'health', text: 'health healthy; master is now 127.0.0.1:6381' });
-      set({ health: 'healthy', latencyMs: 0.7, detail: ['master 127.0.0.1:6381', 'replica 127.0.0.1:6380 syncing', 'quorum OK 3/3'] });
-    }, 3200);
-    setTimeout(() => {
-      push({ mode: 'sentinel', kind: 'health', text: 'replica link ok; failoverReady' });
-      set({ failoverReady: true, detail: ['master 127.0.0.1:6381', 'replica 127.0.0.1:6380 link ok', 'quorum OK 3/3'] });
-    }, 7000);
-  };
 
-  return { status, events, simulateFailover };
+  return { status, events };
 }
 
 // Token classes only (see the showcase tokens in app/globals.css).

@@ -265,22 +265,28 @@ export const OPS: Record<string, OpSpec> = {
     call: (v) => `await redis.streams.ack(${q(v.stream)}, ${q(v.group)}, ...ids)`,
   },
 
-  'failover.failover': {
-    fields: [{ name: 'master', label: 'master name', kind: 'text' }],
-    examples: [
-      { id: 'graceful', title: 'Graceful failover', description: 'Promotes the replica; the package carries on without errors.', values: { master: 'mymaster' } },
-      { id: 'unready', title: 'While not failover-ready', description: 'Replica still syncing: data written meanwhile can be lost.', values: { master: 'mymaster' } },
+  'failover.drill': {
+    fields: [
+      { name: 'kind', label: 'how the master goes away', kind: 'select', options: ['graceful', 'unresponsive'] },
+      { name: 'pauseMs', label: 'pause (ms, unresponsive only)', kind: 'number' },
     ],
-    call: (v) => `SENTINEL FAILOVER ${v.master}   // sent by the showcase, not the package`,
+    examples: [
+      { id: 'graceful', title: 'Graceful failover', description: 'SENTINEL FAILOVER: the replica is promoted and the package carries on without a single error.', values: { kind: 'graceful', pauseMs: '' } },
+      { id: 'unresponsive', title: 'Unresponsive master', description: 'CLIENT PAUSE 8000 ALL on the master: calls stall, onError fires, and for ~10 s two nodes both think they are master.', values: { kind: 'unresponsive', pauseMs: 8000 } },
+    ],
+    call: (v) => (v.kind === 'unresponsive'
+      ? `CLIENT PAUSE ${v.pauseMs || 8000} ALL   // sent to the current master by the showcase, not the package`
+      : 'SENTINEL FAILOVER mymaster   // sent to 127.0.0.1:26379 by the showcase, not the package'),
   },
-  'slots.keyslot': {
-    fields: [{ name: 'key', label: 'key', kind: 'text' }],
+  'slots.inspect': {
+    fields: [{ name: 'keys', label: 'keys (one per line or comma separated)', kind: 'json' }],
     examples: [
-      { id: 'plain', title: 'Plain key', description: 'The whole key is hashed.', values: { key: 'user:42:profile' } },
-      { id: 'tag', title: 'Hash tag', description: 'Only {user:42} is hashed, so related keys share a slot.', values: { key: '{user:42}:profile' } },
-      { id: 'session', title: 'How sessions place keys', description: 'Session keys share {sha256(userId)}, so one user\'s keys share a slot.', values: { key: 'showcase:session:user-sessions:{a3f9c21e}' } },
+      { id: 'plain', title: 'Related keys, no hash tag', description: 'The whole key is hashed, so one user\'s keys scatter across slots and nodes.', values: { keys: 'user:42:profile, user:42:cart, user:42:orders' } },
+      { id: 'tag', title: 'Same keys with a hash tag', description: 'Only {user:42} is hashed: one slot, so multi-key commands are atomic.', values: { keys: '{user:42}:profile, {user:42}:cart, {user:42}:orders' } },
+      { id: 'session', title: 'How sessions place a user\'s keys', description: 'Record and session set share {sha256(userId)}; each token locator lands in its own slot.', values: { keys: 'showcase:session:session:{a3f9c21e}:9be1, showcase:session:user-sessions:{a3f9c21e}, showcase:session:token-index:9be1, showcase:session:token-index:41c7' } },
+      { id: 'empty', title: 'An empty hash tag', description: '{} hashes nothing, so Redis hashes the whole key: foo{}bar and foo{}baz differ.', values: { keys: 'foo{}bar, foo{}baz' } },
     ],
-    call: (v) => `CLUSTER KEYSLOT ${v.key}   // the showcase asks Redis; the package's slot helpers aren't public`,
+    call: (v) => `CLUSTER KEYSLOT <key>  ×${String(v.keys).split(/[\n,]/).filter((k) => k.trim()).length}   // the showcase asks Redis; the package's slot helpers aren't public`,
   },
 };
 

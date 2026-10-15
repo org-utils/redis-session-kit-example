@@ -25,12 +25,14 @@ import { MODES, MODE_ICON, MODULES, MODULE_ICON, healthDot, healthText, modeText
 import { useSessionLab } from '@/lib/showcase/mock-sessions';
 import { RequestForm } from './request-form';
 import { CliSnippet, Commands, HttpBadge, InsightLink, Json, KeysTable, ModeName } from './result-display';
+import { FailoverSection } from './failover-section';
 import { SessionSection } from './session-section';
+import { SlotsSection } from './slots-section';
 
 export function ShowcaseShell() {
   // ?module=<id> opens a section directly.
   const params = useSearchParams();
-  const { status, events, simulateFailover } = useStubLive();
+  const { status, events } = useStubLive();
   const [mode, setMode] = useState<Mode>('standalone');
   const [moduleId, setModuleId] = useState(MODULES.some((m) => m.id === params.get('module')) ? params.get('module')! : 'cache');
   const mod = MODULES.find((m) => m.id === moduleId)!;
@@ -155,6 +157,10 @@ export function ShowcaseShell() {
               </div>
               {moduleId === 'session' ? (
                 <SessionSection mode={mode} lab={lab} last={results[0] ?? null} onResult={(r) => setResults([r])} />
+              ) : moduleId === 'failover' ? (
+                <FailoverSection />
+              ) : moduleId === 'slots' ? (
+                <SlotsSection />
               ) : (<>
               <Tabs value={op.id} onValueChange={(v) => loadOp(moduleId, v)}>
                 <TabsList variant="line">
@@ -172,7 +178,6 @@ export function ShowcaseShell() {
                       <Label htmlFor="compare" className="text-muted-foreground">Compare across all modes</Label>
                     </div>
                   )}
-                  {mod.id === 'failover' && <Button variant="outline" onClick={simulateFailover}>Simulate failover in status</Button>}
                   {modified && example && <span className="ml-auto text-xs text-muted-foreground">based on “{example.title}”</span>}
                 </>} />
               <div className={cn('grid gap-4', results.length > 1 ? 'grid-cols-3' : 'grid-cols-1')}>
