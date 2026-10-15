@@ -1,5 +1,6 @@
 // The mode clients: exactly one package client per connection mode in SHOWCASE_MODES, built through the public
-// facade, with all six modules enabled under identical `showcase:<module>` namespaces on every mode.
+// facade, with all six modules enabled under identical `showcase:<module>` namespaces on every mode. The rate limiter
+// allows 10 requests per 20 s (not the package's 100 per 60 s), so a window fills and resets in front of the visitor.
 import type { Mode } from '@showcase/contracts';
 import { createRedisClient, type RedisClient, type RedisConfig, type RedisErrorContext } from 'ioredis-toolkit';
 import type { Config } from '../config/index.ts';
@@ -15,7 +16,7 @@ export interface ModeClientHooks {
 export const MODE_CLIENT_MODULES = {
   cache: { enabled: true, namespace: 'showcase:cache' },
   lock: { enabled: true, namespace: 'showcase:lock' },
-  rateLimit: { enabled: true, namespace: 'showcase:rate-limit' },
+  rateLimit: { enabled: true, namespace: 'showcase:rate-limit', maxRequests: 10, windowSeconds: 20 },
   pubsub: { enabled: true, namespace: 'showcase:events' },
   streams: { enabled: true, namespace: 'showcase:stream' },
   sessions: { enabled: true, namespace: 'showcase:session' },

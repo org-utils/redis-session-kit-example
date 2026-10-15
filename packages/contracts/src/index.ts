@@ -78,6 +78,8 @@ export const EventLogEntrySchema = z.object({
   kind: z.enum(['error', 'health', 'showcase']),
   /** The `onError` source (`connection`, `subscriber`, …), or `health`. */
   source: z.string(),
+  /** The package's error code, when the error has one (`PUBSUB_SERIALIZATION`, …). */
+  code: z.string().optional(),
   channel: z.string().optional(),
   message: z.string(),
 });
@@ -225,6 +227,42 @@ export const LockLeaseSchema = z.object({
   ttlMs: z.number().nullable(),
 });
 export type LockLease = z.infer<typeof LockLeaseSchema>;
+
+/* ───────────── rate limit: POST /api/:mode/rate-limit/<operation> ───────────── */
+
+// The package validates the cost and subject itself (RATE_LIMIT_INPUT); a blank cost is left out, so it counts 1.
+export const RateLimitConsumeRequestSchema = z.object({ subject: z.string(), cost: z.number().optional() });
+export const RateLimitSubjectRequestSchema = z.object({ subject: z.string() });
+
+/** The package's `consume()` / `check()` result, as returned. */
+export const RateLimitResultSchema = z.object({
+  allowed: z.boolean(),
+  limit: z.number(),
+  remaining: z.number(),
+  /** Unix seconds, in Redis server time, when the window ends. */
+  resetAt: z.number(),
+  retryAfterSeconds: z.number(),
+  count: z.number(),
+});
+export type RateLimitResult = z.infer<typeof RateLimitResultSchema>;
+
+/* ───────────── pub/sub: POST /api/:mode/pubsub/<operation>, GET …/channels/:channel/stream ───────────── */
+
+export const PubSubPublishRequestSchema = z.object({ channel: z.string(), message: z.json() });
+/** A raw PUBLISH of any text to the namespaced channel, as something outside the package would send it. */
+export const PubSubPublishRawRequestSchema = z.object({ channel: z.string(), message: z.string() });
+export const PubSubChannelParamsSchema = z.object({ channel: z.string() });
+
+/**
+ * One SSE `data:` payload on a channel's stream (one subscription, one card). `subscribed` once Redis confirmed the
+ * subscription; `message` per message the package delivered; `error` if subscribing failed (the stream then ends).
+ */
+export const PubSubStreamEventSchema = z.discriminatedUnion('type', [
+  z.object({ type: z.literal('subscribed'), channel: z.string() }),
+  z.object({ type: z.literal('message'), channel: z.string(), value: z.unknown() }),
+  z.object({ type: z.literal('error'), error: z.object({ code: z.string(), name: z.string(), message: z.string() }) }),
+]);
+export type PubSubStreamEvent = z.infer<typeof PubSubStreamEventSchema>;
 
 /* ───────────── errors: every non-2xx response ───────────── */
 

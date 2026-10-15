@@ -19,12 +19,12 @@ for (const mode of MODES) {
       return { status: res.statusCode, body: res.json() };
     };
 
-    before(() => call('reset'));
+    before(() => call('reset-section'));
 
-    test('reset deletes every key in the cache namespace on this mode', async () => {
+    test('reset-section deletes every key in the cache namespace on this mode', async () => {
       await call('set', { key: 'a', value: 1 });
       await call('set', { key: 'b:c', value: 2 });
-      const reset = await call('reset');
+      const reset = await call('reset-section');
       assert.equal(reset.status, 200);
       assert.ok(reset.body.result >= 2, `deleted ${reset.body.result}`);
       assert.deepEqual((await call('has', { key: 'b:c' })).body.result, false);

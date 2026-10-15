@@ -38,7 +38,7 @@ export const MODULES: ShowcaseModule[] = [
       { id: 'release', label: 'release' },
       { id: 'using', label: 'using' },
     ] },
-  { id: 'rate-limit', label: 'Rate limit', kind: 'feature', blurb: 'Atomic fixed-window counters.',
+  { id: 'rate-limit', label: 'Rate limit', kind: 'feature', namespace: 'showcase:rate-limit', blurb: 'Atomic fixed-window counters.',
     ops: [
       { id: 'consume', label: 'consume' },
       { id: 'check', label: 'check' },

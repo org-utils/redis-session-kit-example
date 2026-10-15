@@ -15,6 +15,8 @@ import { createTemporaryClients, type TemporaryClients } from './redis/temporary
 import { cacheModule } from './modules/cache/plugin.ts';
 import { clientModule } from './modules/client/plugin.ts';
 import { lockModule } from './modules/lock/plugin.ts';
+import { pubsubModule } from './modules/pubsub/plugin.ts';
+import { rateLimitModule } from './modules/rate-limit/plugin.ts';
 
 /**
  * A feature module: registered once per mode under `/api/<mode>/<name>`, given that mode's client (and a factory for
@@ -37,7 +39,13 @@ declare module 'fastify' {
 }
 
 /** The feature modules by name, which is also their path segment. */
-export const FEATURE_MODULES: Record<string, FeatureModule> = { client: clientModule, cache: cacheModule, lock: lockModule };
+export const FEATURE_MODULES: Record<string, FeatureModule> = {
+  client: clientModule,
+  cache: cacheModule,
+  lock: lockModule,
+  'rate-limit': rateLimitModule,
+  pubsub: pubsubModule,
+};
 
 export interface AppOptions {
   config: Config;
@@ -57,7 +65,8 @@ export async function buildApp({ config, logger = false, modules = FEATURE_MODUL
     onError(mode, error, { source, channel }) {
       app.log.warn({ mode, source, channel, err: error }, 'mode client error');
       const message = error instanceof Error ? error.message : String(error);
-      eventLog.append(mode, { kind: 'error', source, ...(channel && { channel }), message });
+      const code = (error as { code?: unknown } | null)?.code;
+      eventLog.append(mode, { kind: 'error', source, ...(channel && { channel }), ...(typeof code === 'string' && { code }), message });
     },
   });
   const modeChecks = createModeChecks(clients, config);
