@@ -48,7 +48,10 @@ const isPipelineSlots = (error: Error) => error.message === 'All keys in the pip
 function toResponse(error: FastifyError | Error, mode: Mode | null): { status: number; body: ErrorBody } {
   const body = (code: string) => ({ error: { code, name: error.name, message: error.message, mode } });
   if (error instanceof ModeUnavailableError) return { status: 503, body: body(error.code) };
-  if (error instanceof RedisToolkitError) return { status: packageStatus(error.code), body: body(error.code) };
+  if (error instanceof RedisToolkitError) {
+    // The package's class: every session error's `name` is SessionError, but its class says which (SessionReplayError…).
+    return { status: packageStatus(error.code), body: { error: { ...body(error.code).error, name: error.constructor.name } } };
+  }
   if (isRedisReply(error)) return { status: 502, body: body(error.message.split(' ', 1)[0]) };
   if (isPipelineSlots(error)) return { status: 502, body: body('PIPELINE_SLOTS') };
   // Fastify's own client errors (validation, malformed body…) keep their status and code.

@@ -45,7 +45,7 @@ export function OpForm({ module, ops, mode, tokens, onRun, onResult }: {
   return (
     <div className="space-y-4">
       <Tabs value={op} onValueChange={pickOp}>
-        <TabsList variant="line">{ops.map((o) => <TabsTrigger key={o} value={o} className="font-mono">{o}</TabsTrigger>)}</TabsList>
+        <TabsList variant="line" className="h-auto flex-wrap">{ops.map((o) => <TabsTrigger key={o} value={o} className="font-mono">{o}</TabsTrigger>)}</TabsList>
       </Tabs>
       <RequestForm spec={s} values={values} modified={modified} onChange={setValues} tokens={tokens}
         selected={modified ? null : exampleId} onPick={(e) => { setExampleId(e.id); setValues(e.values); }}

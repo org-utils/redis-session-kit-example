@@ -1,8 +1,9 @@
 // Smoke test of the session feature module per connection mode, against the Docker stacks (`pnpm infra:up`).
 import assert from 'node:assert/strict';
+import { randomUUID } from 'node:crypto';
 import { after, before, describe, test } from 'node:test';
 import { setTimeout as sleep } from 'node:timers/promises';
-import { MODES } from '@showcase/contracts';
+import { MODES, SessionRecordsSchema, type SessionRecord } from '@showcase/contracts';
 import { buildApp } from '../../app.ts';
 import { testConfig } from '../../test-config.ts';
 
@@ -13,6 +14,8 @@ before(() => app.ready());
 after(() => app.close());
 
 const LOGIN = { userId: 'user-42', deviceId: 'laptop', securityVersion: 1, metadata: { plan: 'pro' } };
+/** A user no other test touches, for a test that changes the user's state or counts their sessions. */
+const fresh = () => `user-${randomUUID()}`;
 
 for (const mode of MODES) {
   describe(mode, () => {
@@ -141,6 +144,119 @@ for (const mode of MODES) {
       assert.ok(reset.body.result >= 3, `deleted ${reset.body.result}`);
       assert.equal((await stored(session)).value, null);
       assert.deepEqual((await call('validate')).body.result, { valid: false, reason: 'not_found' });
+    });
+
+    test('rotate: consumes the session, moves the cookie to its successor, and a replay of the old token is SESSION_REPLAY', async () => {
+      const created = (await login()).body.result;
+      const res = await call('rotate');
+      assert.equal(res.status, 200, JSON.stringify(res.body));
+      const { token, session, previousJti } = res.body.result;
+      assert.equal(previousJti, created.session.jti);
+      assert.deepEqual([session.rotatedFrom, session.status, session.userId], [created.session.jti, 'active', 'user-42']);
+      assert.match(res.body.setCookie, new RegExp(`^${cookieName}=${token.replace('.', '\\.')}; `));
+      cookie = token;
+      assert.equal((await call('validate')).body.result.session.id, session.id);
+      assert.deepEqual((await call('validate', { token: created.token })).body.result, { valid: false, reason: 'consumed' });
+      const replay = await call('rotate', { token: created.token });
+      assert.deepEqual([replay.status, replay.body.error.code, replay.body.error.name], [401, 'SESSION_REPLAY', 'SessionReplayError']);
+      assert.equal(replay.body.setCookie, undefined);
+      assert.equal((await call('validate')).body.result.valid, true, 'replay alone ends no session');
+    });
+
+    /** Logs in and rotates once: the consumed token, and the cookie now holding its successor. */
+    const rotated = async () => {
+      const predecessor = (await login()).body.result.token;
+      cookie = (await call('rotate')).body.result.token;
+      return predecessor;
+    };
+
+    test('revoke: logging out with the cookie revokes it and clears the cookie with the deletion cookie', async () => {
+      await login();
+      const res = await call('revoke');
+      assert.deepEqual([res.status, res.body.result], [200, null]);
+      assert.match(res.body.setCookie, new RegExp(`^${cookieName}=; `));
+      assert.match(res.body.setCookie, /Max-Age=0/);
+      assert.deepEqual((await call('validate')).body.result, { valid: false, reason: 'revoked' });
+      assert.deepEqual((await call('revoke')).status, 200, 'idempotent');
+    });
+
+    test('revoke: a stale token follows the rotation chain and revokes its end; the stale one stays consumed', async () => {
+      const stale = await rotated();
+      const res = await call('revoke', { token: stale });
+      assert.deepEqual([res.status, res.body.setCookie], [200, undefined], 'a token from the body is not the cookie');
+      assert.deepEqual((await call('validate')).body.result, { valid: false, reason: 'revoked' });
+      assert.deepEqual((await call('validate', { token: stale })).body.result, { valid: false, reason: 'consumed' });
+    });
+
+    test('destroy: deletes the record outright, no tombstone: not_found at once, and the cookie is cleared', async () => {
+      const { session } = (await login()).body.result;
+      const res = await call('destroy');
+      assert.deepEqual([res.status, res.body.result], [200, null]);
+      assert.match(res.body.setCookie, new RegExp(`^${cookieName}=; .*Max-Age=0`));
+      assert.equal((await stored(session)).value, null);
+      assert.deepEqual((await call('validate')).body.result, { valid: false, reason: 'not_found' });
+      assert.equal((await call('destroy')).status, 200, 'idempotent');
+    });
+
+    test("setSecurityVersion: bumping the user's version invalidates every session created with the old one", async () => {
+      const userId = fresh();
+      await login({ ...LOGIN, userId });
+      const res = await call('setSecurityVersion', { userId, version: 2 });
+      assert.deepEqual([res.status, res.body.result], [200, null]);
+      assert.deepEqual((await call('validate')).body.result, { valid: false, reason: 'invalid' });
+      await login({ ...LOGIN, userId, securityVersion: 2 });
+      assert.equal((await call('validate')).body.result.valid, true);
+      const bad = await call('setSecurityVersion', { userId, version: 1.5 });
+      assert.deepEqual([bad.status, bad.body.error.code], [400, 'SESSION_INVALID']);
+    });
+
+    test('list: the live sessions in the user\'s session set; a rotated or revoked one has left it', async () => {
+      const userId = fresh();
+      const laptop = (await login({ ...LOGIN, userId })).body.result.session;
+      await login({ ...LOGIN, userId, deviceId: 'phone' });
+      const successor = (await call('rotate')).body.result.session;
+      const res = await call('list', { userId, offset: 0, limit: 50 });
+      assert.equal(res.status, 200);
+      assert.deepEqual(res.body.result.map((s: { id: string }) => s.id).sort(), [laptop.id, successor.id].sort());
+      assert.deepEqual((await call('list', { userId: fresh() })).body.result, []);
+    });
+
+    test('revokeAll: deletes a batch outright and reports { affected, remaining } until none are left', async () => {
+      const userId = fresh();
+      for (const deviceId of ['laptop', 'phone', 'tablet']) await login({ ...LOGIN, userId, deviceId });
+      assert.deepEqual((await call('revokeAll', { userId, limit: 1 })).body.result, { affected: 1, remaining: 2 });
+      assert.deepEqual((await call('revokeAll', { userId, limit: 200 })).body.result, { affected: 2, remaining: 0 });
+      assert.deepEqual((await call('validate')).body.result, { valid: false, reason: 'not_found' });
+      assert.deepEqual((await call('revokeAll', { userId })).body.result, { affected: 0, remaining: 0 });
+    });
+
+    test("records: every record Redis holds for the user, tombstones included, with the rotation chain and validate's answer", async () => {
+      const userId = fresh();
+      const records = async () =>
+        SessionRecordsSchema.parse((await app.inject(`/api/${mode}/session/records?${new URLSearchParams({ userId })}`)).json());
+      assert.deepEqual((await records()).sessions, []);
+      const first = (await login({ ...LOGIN, userId })).body.result.session;
+      const successor = (await call('rotate')).body.result.session;
+      cookie = (await login({ ...LOGIN, userId, deviceId: 'phone' })).body.result.token;
+      await call('revoke', { token: cookie });
+
+      const { serverTime, securityVersion, sessions } = await records();
+      assert.equal(securityVersion, 1);
+      assert.ok(Math.abs(serverTime - Date.now() / 1000) < 5, `server time ${serverTime}`);
+      assert.equal(sessions.length, 3);
+      const row = (match: (s: SessionRecord) => boolean) => sessions.find((r) => r.session && match(r.session))!;
+      const [consumed, active, revoked] = [row((s) => s.id === first.id), row((s) => s.id === successor.id), row((s) => s.deviceId === 'phone')];
+      assert.deepEqual([consumed.session?.status, consumed.reason, consumed.inSessionSet], ['consumed', 'consumed', false]);
+      assert.equal(consumed.session?.successorId, successor.id);
+      assert.ok(consumed.ttl! > 0 && consumed.ttl! <= 300, `tombstone ttl ${consumed.ttl}`);
+      assert.deepEqual([active.session?.status, active.reason, active.inSessionSet, active.session?.rotatedFrom], ['active', null, true, first.jti]);
+      assert.ok(active.ttl! > 3500, `ttl ${active.ttl}`);
+      assert.deepEqual([revoked.session?.status, revoked.reason, revoked.inSessionSet], ['revoked', 'revoked', false]);
+
+      await call('setSecurityVersion', { userId, version: 2 });
+      const bumped = await records();
+      assert.equal(bumped.securityVersion, 2);
+      assert.equal(bumped.sessions.find((r) => r.session?.id === successor.id)?.reason, 'invalid');
     });
 
     test('validate: a bad credential is a result, not an error: malformed is invalid, unknown is not_found', async () => {

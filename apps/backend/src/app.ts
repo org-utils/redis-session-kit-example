@@ -1,14 +1,14 @@
 // Builds the Fastify app without listening, so tests can drive it with inject().
 import Fastify, { type FastifyReply, type FastifyServerOptions } from 'fastify';
 import { type FastifyPluginAsyncZod, serializerCompiler, validatorCompiler } from 'fastify-type-provider-zod';
-import type { RedisClient } from 'ioredis-toolkit';
+import type { KeyManager, RedisClient } from 'ioredis-toolkit';
 import type { Config } from './config/index.ts';
 import { ModeUnavailableError, registerErrorHandling } from './http/errors.ts';
 import { eventRoutes } from './http/events.ts';
 import { statusRoutes } from './http/status.ts';
 import { createEventLog, type NewEntry } from './redis/event-log.ts';
 import { createModeChecks } from './redis/mode-checks.ts';
-import { closeModeClients, connectionConfig, createModeClients } from './redis/mode-clients.ts';
+import { closeModeClients, connectionConfig, createModeClients, sessionKeyManager } from './redis/mode-clients.ts';
 import { startTrace, type TraceRecording } from './redis/redis-trace.ts';
 import { createSessionMetrics, type SessionMetricsSink } from './redis/session-metrics.ts';
 import { createStatusMonitor } from './redis/status-monitor.ts';
@@ -33,6 +33,8 @@ export type FeatureModule = FastifyPluginAsyncZod<{
   events: ModeEvents;
   /** The mode client's session metrics sink. */
   sessionMetrics: SessionMetricsSink;
+  /** The key manager the mode client encrypts sessions with, for reading records beside the package. */
+  sessionKeys: KeyManager;
 }>;
 
 /** One mode's event log, for what a feature module notices in the background. */
@@ -73,6 +75,7 @@ export async function buildApp({ config, logger = false, modules = FEATURE_MODUL
 
   const eventLog = createEventLog();
   const sessionMetrics = new Map(config.SHOWCASE_MODES.map((mode) => [mode, createSessionMetrics()]));
+  const sessionKeys = sessionKeyManager(config);
   const clients = createModeClients(config, {
     sessionMetrics: (mode) => sessionMetrics.get(mode)!,
     onError(mode, error, { source, channel }) {
@@ -130,7 +133,7 @@ export async function buildApp({ config, logger = false, modules = FEATURE_MODUL
         const events: ModeEvents = { append: (entry) => eventLog.append(mode, entry) };
         for (const [name, module] of Object.entries(modules)) {
           await scope.register(module, {
-            client, temporaryClients, events, sessionMetrics: sessionMetrics.get(mode)!, prefix: `/${name}`,
+            client, temporaryClients, events, sessionMetrics: sessionMetrics.get(mode)!, sessionKeys, prefix: `/${name}`,
           });
         }
       },

@@ -14,6 +14,11 @@ export interface ShowcaseModule {
   namespace?: string;
 }
 
+/** The session operations, in the order the section's tabs show them. */
+export const SESSION_OPS = [
+  'create', 'validate', 'get', 'touch', 'update', 'rotate', 'revoke', 'destroy', 'setSecurityVersion', 'revokeAll', 'list',
+];
+
 export const MODULES: ShowcaseModule[] = [
   { id: 'client', label: 'Client', kind: 'feature', blurb: 'Config validation, namespaces, raw commands, health, shutdown.',
     ops: [
@@ -24,8 +29,8 @@ export const MODULES: ShowcaseModule[] = [
       { id: 'raw', label: 'raw commands' },
       { id: 'shutdown', label: 'shutdown' },
     ] },
-  { id: 'session', label: 'Session', kind: 'feature', namespace: 'showcase:session', blurb: 'Opaque credentials in a cookie, encrypted records, idle and absolute expiry.',
-    ops: ['create', 'validate', 'get', 'touch', 'update'].map((id) => ({ id, label: id })) },
+  { id: 'session', label: 'Session', kind: 'feature', namespace: 'showcase:session', blurb: 'Opaque credentials in a cookie, encrypted records, expiry, rotation and revocation.',
+    ops: SESSION_OPS.map((id) => ({ id, label: id })) },
   { id: 'cache', label: 'Cache', kind: 'feature', namespace: 'showcase:cache', blurb: 'JSON values with TTL and conditional writes.',
     ops: ['set', 'get', 'has', 'ttl', 'setIfAbsent', 'delete', 'clear'].map((id) => ({ id, label: id })) },
   { id: 'lock', label: 'Lock', kind: 'feature', namespace: 'showcase:lock', blurb: 'Ownership-token leases.',
