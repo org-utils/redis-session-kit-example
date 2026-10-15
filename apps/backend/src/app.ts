@@ -133,7 +133,8 @@ export async function buildApp({ config, logger = false, modules = FEATURE_MODUL
         const events: ModeEvents = { append: (entry) => eventLog.append(mode, entry) };
         for (const [name, module] of Object.entries(modules)) {
           await scope.register(module, {
-            client, temporaryClients, events, sessionMetrics: sessionMetrics.get(mode)!, sessionKeys, prefix: `/${name}`,
+            client, temporaryClients, events, sessionMetrics: sessionMetrics.get(mode)!, sessionKeys,
+            prefix: `/${name}`,
           });
         }
       },

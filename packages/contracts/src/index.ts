@@ -399,12 +399,12 @@ export const SessionRecordSchema = z.looseObject({
 });
 export type SessionRecord = z.infer<typeof SessionRecordSchema>;
 
+export const SessionRecordsQuerySchema = z.object({ userId: z.string() });
 /**
  * The live table: every session record Redis holds for a user on this mode, tombstones included, read natively (SCAN of
  * the user's slot, then one read of it all at one instant) and decrypted with the showcase's key manager. Not a package
  * call: list() leaves out tombstones and anything expired.
  */
-export const SessionRecordsQuerySchema = z.object({ userId: z.string() });
 export const SessionRecordsSchema = z.object({
   userId: z.string(),
   /** Redis server time (seconds) of the read, which every expiry is measured against. */

@@ -2,27 +2,17 @@
 // sets this mode's session cookie with the package's own cookie helper, and an operation given no token presents that
 // cookie, as a real request would. Registered once per mode under /api/<mode>/session; it only ever sees that mode's
 // client.
-import { createHash } from 'node:crypto';
 import {
   SessionCreateRequestSchema, SessionListRequestSchema, SessionRecordsQuerySchema, SessionRevokeAllRequestSchema,
-  SessionSecurityVersionRequestSchema,
-  SessionStoredQuerySchema, SessionTokenRequestSchema, SessionUpdateRequestSchema,
+  SessionSecurityVersionRequestSchema, SessionStoredQuerySchema, SessionTokenRequestSchema, SessionUpdateRequestSchema,
   type SessionCookie, type SessionStored,
 } from '@showcase/contracts';
 import type { RedisClient } from 'ioredis-toolkit';
 import type { FeatureModule } from '../../app.ts';
-import { readRecords } from './records.ts';
+import { readRecords, userKeys } from './records.ts';
 
 /** GET and TTL in one round trip, on whichever node owns the key. A missing key's GET comes back as null. */
 const STORED = "return { redis.call('GET', KEYS[1]), redis.call('TTL', KEYS[1]) }";
-
-/**
- * A session's record key, built as the package builds it (its key strategy isn't public): the namespace, `session`,
- * the user's hash tag `{sha256(userId)}` and the session id, which is the hash of its token.
- */
-function recordKey(namespace: string, userId: string, id: string): string {
-  return `${namespace}:session:{${createHash('sha256').update(userId, 'utf8').digest('hex')}}:${id}`;
-}
 
 async function readStored(client: RedisClient, key: string): Promise<SessionStored> {
   const [value, ttl] = (await client.eval(STORED, 1, key)) as [string | null, number];
@@ -54,7 +44,7 @@ export const sessionModule: FeatureModule = async (app, { client, sessionMetrics
   // The live view of what Redis stores for a session: native GET + TTL, not a package call, so it is not traced. The
   // records are encrypted, so this is the ciphertext beside the session the package decrypts.
   app.get('/stored', { schema: { querystring: SessionStoredQuerySchema } }, ({ query }) =>
-    readStored(client, recordKey(client.config.sessions.namespace, query.userId, query.id)),
+    readStored(client, userKeys(client.config.sessions.namespace, query.userId).record(query.id)),
   );
   // The live table: every record Redis holds for the user, tombstones included (see records.ts). Not traced either.
   app.get('/records', { schema: { querystring: SessionRecordsQuerySchema } }, ({ query }) =>
@@ -79,15 +69,17 @@ export const sessionModule: FeatureModule = async (app, { client, sessionMetrics
   app.post('/update', { schema: { body: SessionUpdateRequestSchema } }, (request) =>
     sessions.update(presented(request), { metadata: request.body.metadata }, request.body.expectedVersion),
   );
-  // The successor's credential replaces the old one in this browser, as an app rotating on a privilege change would.
+  // An operation given no token presented this browser's cookie, so its response changes the cookie too: a rotation's
+  // successor replaces it, as an app rotating on a privilege change would, and a logout clears it. A token from the
+  // body (a stale one, another device's wallet entry) is not this browser's cookie, which stays.
   app.post('/rotate', { schema: { body: SessionTokenRequestSchema } }, async (request, reply) => {
     const rotated = await sessions.rotate(presented(request));
-    reply.header('set-cookie', await sessions.cookie(rotated.token, rotated.session));
+    if (request.body.token === undefined) {
+      reply.header('set-cookie', await sessions.cookie(rotated.token, rotated.session));
+    }
     return rotated;
   });
-  // Logouts: revoke leaves a tombstone, destroy deletes outright. Given no token, one presented this browser's cookie, so
-  // the response clears the cookie as well; a token from the body (a stale one, a wallet entry) is not this browser's
-  // cookie, which stays. Both return nothing: null stands for their undefined.
+  // Logouts: revoke leaves a tombstone, destroy deletes outright. Both return nothing: null stands for their undefined.
   for (const op of ['revoke', 'destroy'] as const) {
     app.post(`/${op}`, { schema: { body: SessionTokenRequestSchema } }, async (request, reply) => {
       await sessions[op](presented(request));

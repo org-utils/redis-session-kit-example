@@ -238,6 +238,29 @@ function SessionsTable({ mode, userId, records, cookieId }: { mode: Mode; userId
   );
 }
 
+/** What a run tells the section: the operation, its form values and the credential they presented, and what came back. */
+interface Ran { op: string; v: Values; presented: string | null; r: RunResult; session: Session | null }
+
+/** A mode's Known after a run. */
+function afterRun(was: Known, { op, v, presented, r, session }: Ran): Known {
+  const ok = r.httpStatus === 200;
+  // A login or a rotation hands this browser a credential: it joins the wallet.
+  type Handed = { token: string; session: Session; previousJti?: string };
+  const handed = ok && (op === 'create' || op === 'rotate') ? (r.body as Handed) : null;
+  const wallet = handed
+    ? [...was.wallet, {
+      token: handed.token, id: handed.session.id, jti: handed.session.jti, userId: handed.session.userId,
+      deviceId: handed.session.deviceId, via: op as WalletEntry['via'],
+    }]
+    : was.wallet;
+  // What a rotation consumed: the wallet's entry with the predecessor's jti, else the credential the form presented.
+  const previous = handed?.previousJti
+    ? was.wallet.find((w) => w.jti === handed.previousJti)?.token ?? presented
+    : was.previous;
+  const userId = session?.userId ?? (ok && USER_OPS.includes(op) ? String(v.userId) : was.userId);
+  return { ...was, ...(session && { session, from: op }), setCookie: r.setCookie ?? was.setCookie, wallet, previous, userId };
+}
+
 export function SessionSection({ mode, resets, onResult }: { mode: Mode; resets: Record<Mode, number>; onResult: (r: RunResult) => void }) {
   const [known, setKnown] = useState(() => perMode<Known>(() => ({
     session: null, from: '', setCookie: null, wallet: [], previous: null, userId: 'user-42',
@@ -260,25 +283,10 @@ export function SessionSection({ mode, resets, onResult }: { mode: Mode; resets:
       if (v.token === '$previous' && !previous) throw new Error(`no rotation on ${at} yet: there is no token before the last one`);
       return spec('session', op).body!(v.token === '$previous' ? { ...v, token: previous! } : v);
     });
-    const ok = r.httpStatus === 200;
-    const session = ok ? sessionIn(op, r.body) : null;
-    setKnown((k) => {
-      const was = k[at];
-      const handed = ok && (op === 'create' || op === 'rotate') ? (r.body as { token: string; session: Session; previousJti?: string }) : null;
-      const wallet = handed
-        ? [...was.wallet, { token: handed.token, id: handed.session.id, jti: handed.session.jti, userId: handed.session.userId, deviceId: handed.session.deviceId, via: op as WalletEntry['via'] }]
-        : was.wallet;
-      // The consumed token: the wallet's entry with the predecessor's jti, else the token the form presented.
-      const presented = v.token === '$previous' ? previous : v.token === '$cookie' ? cookie?.value ?? null : String(v.token);
-      const consumed = handed?.previousJti ? was.wallet.find((w) => w.jti === handed.previousJti)?.token ?? presented : was.previous;
-      const userId = session?.userId ?? (ok && USER_OPS.includes(op) ? String(v.userId) : was.userId);
-      return {
-        ...k,
-        [at]: {
-          ...was, ...(session && { session, from: op }), setCookie: r.setCookie ?? was.setCookie, wallet, previous: consumed, userId,
-        },
-      };
-    });
+    const session = r.httpStatus === 200 ? sessionIn(op, r.body) : null;
+    // The credential the form presented: the cookie as last read, the token before the last rotation, or a typed one.
+    const presented = v.token === '$cookie' ? cookie?.value ?? null : v.token === '$previous' ? previous : String(v.token ?? '');
+    setKnown((k) => ({ ...k, [at]: afterRun(k[at], { op, v, presented, r, session }) }));
     setRuns((n) => n + 1);
     return r;
   };

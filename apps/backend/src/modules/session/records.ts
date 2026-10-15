@@ -11,7 +11,8 @@ import type { KeyManager, RedisClient } from 'ioredis-toolkit';
 
 /**
  * KEYS[1] the user's session set, KEYS[2] their security version, KEYS[3..] their record keys (all in the user's slot).
- * Returns { server seconds, security version or false, the set's members, each record's value or false, each one's PTTL }.
+ * Returns { server seconds, security version or false, the set's members, each record's value or false, each one's
+ * PTTL }.
  */
 const READ = `
 local values, ttls = {}, {}
@@ -21,20 +22,29 @@ for i = 3, #KEYS do
 end
 return { redis.call('TIME')[1], redis.call('GET', KEYS[2]), redis.call('ZRANGE', KEYS[1], 0, -1), values, ttls }`;
 
-/** The package's keys for a user, built as it builds them: the namespace, the kind and the hash tag `{sha256(userId)}`. */
-function userKeys(namespace: string, userId: string) {
+/**
+ * The package's keys for a user, built as it builds them (its key strategy isn't public): the namespace, the kind and
+ * the user's hash tag `{sha256(userId)}`, so they all share one slot. A record's key ends with its session id, the
+ * hash of its token.
+ */
+export function userKeys(namespace: string, userId: string) {
   const tag = `{${createHash('sha256').update(userId, 'utf8').digest('hex')}}`;
   return {
+    record: (id: string) => `${namespace}:session:${tag}:${id}`,
     records: `${namespace}:session:${tag}:*`,
     sessionSet: `${namespace}:user-sessions:${tag}`,
     securityVersion: `${namespace}:security-version:${tag}`,
   };
 }
 
-/** A stored value as a record: the package's envelope, AES-256-GCM under its key version when encrypted. Null if unreadable. */
+/**
+ * A stored value as a record: the package's envelope, AES-256-GCM under its key version when encrypted. Null when it
+ * can't be read.
+ */
 export function decodeRecord(value: string, keys: KeyManager): SessionRecord | null {
   try {
-    const envelope = JSON.parse(value) as { enc?: number; keyVersion?: string; iv?: string; tag?: string; data: string };
+    type Envelope = { enc?: number; keyVersion?: string; iv?: string; tag?: string; data: string };
+    const envelope = JSON.parse(value) as Envelope;
     let payload = envelope.data;
     if (envelope.enc === 1) {
       const key = keys.get(envelope.keyVersion ?? '');
@@ -53,7 +63,9 @@ export function decodeRecord(value: string, keys: KeyManager): SessionRecord | n
  * What validate() would answer for a record's credential, in the order it checks: null when it would be valid. The mode
  * clients enable security versions, so a user with none stored can't authenticate either.
  */
-function reasonFor(session: SessionRecord, now: number, inSessionSet: boolean, securityVersion: number | null): SessionInvalidReason | null {
+function reasonFor(
+  session: SessionRecord, now: number, inSessionSet: boolean, securityVersion: number | null,
+): SessionInvalidReason | null {
   if (session.status !== 'active') return session.status;
   if (session.expiresAt <= now) return 'expired';
   if (session.absoluteExpiresAt !== null && session.absoluteExpiresAt <= now) return 'absolute_timeout';
@@ -62,11 +74,13 @@ function reasonFor(session: SessionRecord, now: number, inSessionSet: boolean, s
   return null;
 }
 
-export async function readRecords(client: RedisClient, keys: KeyManager, userId: string): Promise<SessionRecords> {
-  const k = userKeys(client.config.sessions.namespace, userId);
-  const recordKeys = await client.scanCluster(k.records);
+export async function readRecords(
+  client: RedisClient, sessionKeys: KeyManager, userId: string,
+): Promise<SessionRecords> {
+  const redisKeys = userKeys(client.config.sessions.namespace, userId);
+  const recordKeys = await client.scanCluster(redisKeys.records);
   const [time, version, members, values, ttls] = (await client.eval(
-    READ, 2 + recordKeys.length, k.sessionSet, k.securityVersion, ...recordKeys,
+    READ, 2 + recordKeys.length, redisKeys.sessionSet, redisKeys.securityVersion, ...recordKeys,
   )) as [string, string | null, string[], (string | null)[], number[]];
   const serverTime = Number(time);
   const securityVersion = version === null ? null : Number(version);
@@ -74,7 +88,7 @@ export async function readRecords(client: RedisClient, keys: KeyManager, userId:
   const sessions = recordKeys.flatMap((key, i) => {
     const value = values[i];
     if (value === null) return []; // deleted between the SCAN and the read
-    const session = decodeRecord(value, keys);
+    const session = decodeRecord(value, sessionKeys);
     const inSessionSet = inSet.has(key.slice(key.lastIndexOf(':') + 1));
     return [{
       key,

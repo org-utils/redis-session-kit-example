@@ -175,6 +175,7 @@ export const OPS: Record<string, OpSpec> = {
       { id: 'phone', title: 'Same user on a phone', description: 'A second session in the user\'s session set; the cookie now holds this one.', values: { userId: 'user-42', deviceId: 'phone', securityVersion: 1, metadata: '{}', ttl: '', idleTimeout: '', absoluteTimeout: '' } },
       { id: 'idle', title: 'Watch an idle timeout', description: 'idleTimeout 20 s: leave it alone and validate answers idle_timeout.', values: { userId: 'user-42', deviceId: 'kiosk', securityVersion: 1, metadata: '{}', ttl: '', idleTimeout: 20, absoluteTimeout: '' } },
       { id: 'absolute', title: 'Watch an absolute timeout', description: 'Idle 20 s, absolute 45 s (and ttl 45: it may not exceed absoluteTimeout). Touching keeps it past 20 s, but at 45 s Redis expires the record: not_found.', values: { userId: 'user-42', deviceId: 'kiosk', securityVersion: 1, metadata: '{}', ttl: 45, idleTimeout: 20, absoluteTimeout: 45 } },
+      { id: 'after-reset', title: 'Log in after a password reset', description: 'securityVersion 2: valid once setSecurityVersion has bumped the user to 2, while the sessions created with 1 stay invalid.', values: { userId: 'user-42', deviceId: 'laptop', securityVersion: 2, metadata: '{ "plan": "pro" }', ttl: '', idleTimeout: '', absoluteTimeout: '' } },
       { id: 'too-long', title: 'Absolute timeout under the ttl', description: 'absoluteTimeout 45 s with the configured ttl of 3600 s: SESSION_INVALID.', values: { userId: 'user-42', deviceId: 'kiosk', securityVersion: 1, metadata: '{}', ttl: '', idleTimeout: '', absoluteTimeout: 45 } },
     ],
     call: (v) => `await redis.sessions.create({ userId: ${q(v.userId)}, deviceId: ${q(v.deviceId)}, securityVersion: ${v.securityVersion}, metadata: ${json(v.metadata)}${['ttl', 'idleTimeout', 'absoluteTimeout'].filter((f) => v[f] !== '').map((f) => `, ${f}: ${v[f]}`).join('')}, ipAddress, userAgent })`,
@@ -224,7 +225,7 @@ export const OPS: Record<string, OpSpec> = {
   'session.rotate': {
     fields: [sessionToken],
     examples: [
-      { id: 'current', title: 'Rotate after privilege change', description: 'Consumes the session and creates its successor (rotatedFrom links back); the cookie moves on to the successor, which joins the token wallet.', values: { token: '$cookie' } },
+      { id: 'current', title: 'Rotate after privilege change', description: 'Consumes the session and creates its successor (rotatedFrom links back); the cookie moves on to the successor, which joins the token wallet. Rotating a wallet entry instead leaves the cookie alone.', values: { token: '$cookie' } },
       { id: 'replay', title: 'Replay the old token', description: 'Rotating the consumed predecessor: SessionReplayError (401). Replay alone ends no session: the successor stays active.', values: { token: '$previous' } },
     ],
     call: (v) => `await redis.sessions.rotate(${tok(v.token)})`,
@@ -234,7 +235,7 @@ export const OPS: Record<string, OpSpec> = {
     fields: [sessionToken],
     examples: [
       { id: 'logout', title: 'Log out', description: 'Revokes the session and clears the cookie; the record stays as a revoked tombstone (≤ 300 s) and answers revoked until it expires.', values: { token: '$cookie' } },
-      { id: 'stale', title: 'Log out with a stale cookie', description: 'Revoking the consumed predecessor follows the rotation chain and revokes its end; the stale token stays consumed, so replay is still reported.', values: { token: '$previous' } },
+      { id: 'stale', title: 'Log out from a stale tab', description: 'A tab still holding the token from before the rotation logs out with it: revoke follows the rotation chain and revokes its end, the session in this browser\'s cookie (validate it: revoked). The stale token stays consumed, so replay is still reported.', values: { token: '$previous' } },
     ],
     call: (v) => `await redis.sessions.revoke(${tok(v.token)})`,
     body: sessionTokenBody,
@@ -248,7 +249,7 @@ export const OPS: Record<string, OpSpec> = {
   'session.setSecurityVersion': {
     fields: [{ name: 'userId', label: 'userId', kind: 'text' }, { name: 'version', label: 'version', kind: 'number' }],
     examples: [
-      { id: 'reset', title: 'Password reset', description: 'Bump to 2: nothing is deleted, but every session created with 1 now validates as invalid. Log in with securityVersion 2 to get a valid one.', values: { userId: 'user-42', version: 2 } },
+      { id: 'reset', title: 'Password reset', description: 'Bump to 2: nothing is deleted, but every session created with 1 now validates as invalid. The create example “Log in after a password reset” gets a valid one.', values: { userId: 'user-42', version: 2 } },
       { id: 'bad', title: 'Not a whole number', description: '1.5 is rejected: SESSION_INVALID.', values: { userId: 'user-42', version: 1.5 } },
     ],
     call: (v) => `await redis.sessions.setSecurityVersion(${q(v.userId)}, ${v.version})`,

@@ -163,6 +163,14 @@ for (const mode of MODES) {
       assert.equal((await call('validate')).body.result.valid, true, 'replay alone ends no session');
     });
 
+    test("rotate: a token from the body (another device's) gets its successor, and this browser's cookie stays", async () => {
+      const other = (await login({ ...LOGIN, deviceId: 'phone' })).body.result.token;
+      await login();
+      const res = await call('rotate', { token: other });
+      assert.deepEqual([res.status, res.body.setCookie, res.body.result.session.deviceId], [200, undefined, 'phone']);
+      assert.equal((await call('validate')).body.result.session.deviceId, 'laptop');
+    });
+
     /** Logs in and rotates once: the consumed token, and the cookie now holding its successor. */
     const rotated = async () => {
       const predecessor = (await login()).body.result.token;

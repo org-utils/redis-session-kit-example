@@ -46,11 +46,12 @@ const isRedisReply = (error: Error) => error.name === 'ReplyError';
 const isPipelineSlots = (error: Error) => error.message === 'All keys in the pipeline should belong to the same slots allocation group';
 
 function toResponse(error: FastifyError | Error, mode: Mode | null): { status: number; body: ErrorBody } {
-  const body = (code: string) => ({ error: { code, name: error.name, message: error.message, mode } });
+  const body = (code: string, name = error.name) => ({ error: { code, name, message: error.message, mode } });
   if (error instanceof ModeUnavailableError) return { status: 503, body: body(error.code) };
+  // A package error names its class: every session error's `name` is SessionError, but its class says which
+  // (SessionReplayError…).
   if (error instanceof RedisToolkitError) {
-    // The package's class: every session error's `name` is SessionError, but its class says which (SessionReplayError…).
-    return { status: packageStatus(error.code), body: { error: { ...body(error.code).error, name: error.constructor.name } } };
+    return { status: packageStatus(error.code), body: body(error.code, error.constructor.name) };
   }
   if (isRedisReply(error)) return { status: 502, body: body(error.message.split(' ', 1)[0]) };
   if (isPipelineSlots(error)) return { status: 502, body: body('PIPELINE_SLOTS') };
