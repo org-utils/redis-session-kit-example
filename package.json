@@ -3,6 +3,7 @@
   "private": true,
   "packageManager": "pnpm@11.5.1",
   "scripts": {
-    "dev": "pnpm --filter frontend dev"
+    "dev": "pnpm --filter frontend dev",
+    "prototype:failover-slots": "pnpm --filter frontend dev"
   }
 }

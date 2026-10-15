@@ -26,10 +26,14 @@ import { useSessionLab } from '@/lib/showcase/mock-sessions';
 import { RequestForm } from './request-form';
 import { CliSnippet, Commands, HttpBadge, InsightLink, Json, KeysTable, ModeName } from './result-display';
 import { SessionSection } from './session-section';
+import { VariantSwitcher, useVariant } from '@/components/prototype/variant-switcher';
+import { FAILOVER_VARIANTS, FailoverPrototype } from './failover.prototype';
+import { SLOTS_VARIANTS, SlotsPrototype } from './slots.prototype';
 
 export function ShowcaseShell() {
-  // ?module=<id> opens a section directly.
+  // ?module=<id> opens a section directly; ?variant=A|B|C picks a prototype variant (failover and slots, PROTOTYPE).
   const params = useSearchParams();
+  const variant = useVariant(['A', 'B', 'C']);
   const { status, events, simulateFailover } = useStubLive();
   const [mode, setMode] = useState<Mode>('standalone');
   const [moduleId, setModuleId] = useState(MODULES.some((m) => m.id === params.get('module')) ? params.get('module')! : 'cache');
@@ -155,6 +159,10 @@ export function ShowcaseShell() {
               </div>
               {moduleId === 'session' ? (
                 <SessionSection mode={mode} lab={lab} last={results[0] ?? null} onResult={(r) => setResults([r])} />
+              ) : moduleId === 'failover' ? (
+                <><FailoverPrototype variant={variant} /><VariantSwitcher variants={FAILOVER_VARIANTS} /></>
+              ) : moduleId === 'slots' ? (
+                <><SlotsPrototype variant={variant} /><VariantSwitcher variants={SLOTS_VARIANTS} /></>
               ) : (<>
               <Tabs value={op.id} onValueChange={(v) => loadOp(moduleId, v)}>
                 <TabsList variant="line">
