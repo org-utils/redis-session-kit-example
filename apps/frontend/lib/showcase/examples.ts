@@ -1,5 +1,5 @@
-// Built-in, editable examples per operation, with the fields each form shows and the equivalent
-// ioredis-toolkit call. Still a draft for the non-session sections (see the Examples ticket on the map).
+// Built-in, editable examples per operation, with the fields each form shows and the equivalent ioredis-toolkit call,
+// following the catalogue settled on the Examples ticket. A spec with a request `body` runs for real.
 
 export type Value = string | number | boolean;
 export type Values = Record<string, Value>;
@@ -28,10 +28,13 @@ const parse = (s: Value, field: string) => {
 };
 /** A number field left blank means "not given", so the package's default applies. */
 const optional = (s: Value) => (s === '' ? undefined : Number(s));
+/** A text field left blank means "not given". */
+const blank = (s: Value) => (s === '' ? undefined : String(s));
 const cacheTtl = { name: 'ttl', label: 'ttl (seconds)', kind: 'number', help: 'blank: the default TTL, 300 s' } as const;
 /** The lock section's holder: which lane runs the operation and keeps its tokens. Not sent to the backend. */
 const lane: Field = { name: 'lane', label: 'holder', kind: 'select', options: ['A', 'B'] };
 const lockName: Field = { name: 'name', label: 'name', kind: 'text' };
+const stream: Field = { name: 'stream', label: 'stream', kind: 'text' };
 const subject: Field = { name: 'subject', label: 'subject', kind: 'text' };
 const lockTtl: Field = { name: 'ttl', label: 'ttl (seconds)', kind: 'number', help: 'blank: the default lease, 30 s (maxTtl 300)' };
 
@@ -419,35 +422,67 @@ export const OPS: Record<string, OpSpec> = {
     body: (v) => (v.raw ? { channel: v.channel, message: String(v.message) } : { channel: v.channel, message: parse(v.message, 'message') }),
   },
   'streams.createGroup': {
-    fields: [{ name: 'group', label: 'group', kind: 'text' }, { name: 'start', label: 'start id', kind: 'select', options: ['$', '0'] }],
+    fields: [stream, { name: 'group', label: 'group', kind: 'text' }, { name: 'start', label: 'start id', kind: 'select', options: ['$', '0'] }],
     examples: [
-      { id: 'billing', title: 'Billing from now on', description: 'Only entries added after this.', values: { group: 'billing', start: '$' } },
-      { id: 'audit', title: 'Audit replaying history', description: 'Start at 0: every existing entry.', values: { group: 'audit', start: '0' } },
+      { id: 'billing', title: 'Billing from now on', description: 'Start at $: only entries added after this. Creates the stream too (MKSTREAM).', values: { stream: 'orders', group: 'billing', start: '$' } },
+      { id: 'again', title: 'Again', description: 'The group exists: Redis answers BUSYGROUP, which the package counts as success.', values: { stream: 'orders', group: 'billing', start: '$' } },
+      { id: 'audit', title: 'Audit replaying history', description: 'Start at 0: every entry already in the stream is new to this group.', values: { stream: 'orders', group: 'audit', start: '0' } },
     ],
-    call: (v) => `await redis.streams.createGroup('orders', '${v.group}', '${v.start}')`,
+    call: (v) => `await redis.streams.createGroup(${q(v.stream)}, ${q(v.group)}, ${q(v.start)})`,
+    body: (v) => ({ stream: v.stream, group: v.group, start: v.start }),
   },
   'streams.add': {
-    fields: [{ name: 'fields', label: 'fields (JSON)', kind: 'json' }],
+    fields: [stream, { name: 'fields', label: 'fields (JSON object of strings)', kind: 'json' }, { name: 'maxEntries', label: 'maxEntries', kind: 'number', help: 'blank: the default trim, ~100000' }],
     examples: [
-      { id: 'event', title: 'Append an order event', description: 'Shows up in the follow pane right away.', values: { fields: '{ "orderId": "42", "type": "created" }' } },
-      { id: 'empty', title: 'No fields', description: '→ STREAMS_INPUT.', values: { fields: '{}' } },
+      { id: 'event', title: 'Append an order event', description: 'Shows up in the follow pane right away; a group created at $ before it will deliver it.', values: { stream: 'orders', fields: '{ "orderId": "42", "type": "created" }', maxEntries: '' } },
+      { id: 'capped', title: 'Tiny capped stream', description: 'MAXLEN ~ 10 on recent: approximate, so Redis trims only whole nodes of 100 entries. It keeps up to 101 entries, drops to 10 on the next add, then grows again.', values: { stream: 'recent', fields: '{ "event": "page_view" }', maxEntries: 10 } },
+      { id: 'empty', title: 'No fields', description: '→ STREAMS_INPUT (400), nothing sent.', values: { stream: 'orders', fields: '{}', maxEntries: '' } },
     ],
-    call: (v) => `await redis.streams.add('orders', ${String(v.fields).replace(/\s+/g, ' ')})`,
+    call: (v) => `await redis.streams.add(${q(v.stream)}, ${json(v.fields)}${v.maxEntries !== '' ? `, ${v.maxEntries}` : ''})`,
+    body: (v) => ({ stream: v.stream, fields: parse(v.fields, 'fields'), maxEntries: optional(v.maxEntries) }),
   },
   'streams.read': {
-    fields: [{ name: 'group', label: 'group', kind: 'text' }, { name: 'consumer', label: 'consumer', kind: 'text' }, { name: 'count', label: 'count', kind: 'number' }, { name: 'pending', label: 're-read my pending entries (id 0)', kind: 'boolean' }],
-    examples: [
-      { id: 'w1', title: 'New entries for worker-1', description: '">": entries become pending until acked.', values: { group: 'billing', consumer: 'worker-1', count: 2, pending: false } },
-      { id: 'w2', title: 'worker-2 gets different ones', description: 'Each entry goes to one consumer in the group.', values: { group: 'billing', consumer: 'worker-2', count: 2, pending: false } },
-      { id: 'recover', title: 'Recover pending', description: 'id 0 re-delivers what worker-1 never acked.', values: { group: 'billing', consumer: 'worker-1', count: 10, pending: true } },
-      { id: 'ghost', title: 'Missing group', description: '→ NOGROUP from Redis.', values: { group: 'ghost', consumer: 'worker-1', count: 2, pending: false } },
+    fields: [
+      stream,
+      { name: 'group', label: 'group', kind: 'text', help: 'blank: a plain read' },
+      { name: 'consumer', label: 'consumer', kind: 'text' },
+      { name: 'count', label: 'count', kind: 'number' },
+      { name: 'id', label: 'id', kind: 'text', help: 'blank: > with a group (new entries), $ without. 0: my pending entries, or from the start' },
     ],
-    call: (v) => `await redis.streams.read('orders', { group: '${v.group}', consumer: '${v.consumer}', count: ${v.count}${v.pending ? ", id: '0'" : ''} })`,
+    examples: [
+      { id: 'w1', title: 'New entries for worker-1', description: '">": entries never delivered to the group. They stay pending (amber) until acked. Run “Billing from now on”, then add entries first.', values: { stream: 'orders', group: 'billing', consumer: 'worker-1', count: 2, id: '>' } },
+      { id: 'w2', title: 'worker-2 gets different ones', description: 'Each entry goes to one consumer in the group.', values: { stream: 'orders', group: 'billing', consumer: 'worker-2', count: 2, id: '>' } },
+      { id: 'recover', title: 'Recover pending', description: 'id 0 re-delivers what worker-1 read but never acked, e.g. after a crash.', values: { stream: 'orders', group: 'billing', consumer: 'worker-1', count: 10, id: '0' } },
+      { id: 'ghost', title: 'Missing group', description: 'No group ghost on orders → NOGROUP from Redis (502).', values: { stream: 'orders', group: 'ghost', consumer: 'worker-1', count: 2, id: '>' } },
+      { id: 'noconsumer', title: 'Group without consumer', description: 'A group read needs a consumer → STREAMS_INPUT (400), nothing sent.', values: { stream: 'orders', group: 'billing', consumer: '', count: 2, id: '>' } },
+      { id: 'start', title: 'From the start', description: 'A plain read (no group) from id 0: the first 10 entries, nothing becomes pending.', values: { stream: 'orders', group: '', consumer: '', count: 10, id: '0' } },
+    ],
+    call: (v) => {
+      const options = [v.group !== '' && `group: ${q(v.group)}`, v.consumer !== '' && `consumer: ${q(v.consumer)}`, v.count !== '' && `count: ${v.count}`, v.id !== '' && `id: ${q(v.id)}`, 'blockMs: 100'].filter(Boolean);
+      return `await redis.streams.read(${q(v.stream)}, { ${options.join(', ')} })`;
+    },
+    body: (v) => ({ stream: v.stream, group: blank(v.group), consumer: blank(v.consumer), count: optional(v.count), id: blank(v.id) }),
   },
   'streams.ack': {
-    fields: [{ name: 'group', label: 'group', kind: 'text' }, { name: 'ids', label: 'ids', kind: 'token' }],
-    examples: [{ id: 'ack', title: 'Ack what I read', description: 'Clears it from the pending table.', values: { group: 'billing', ids: '$last' } }],
-    call: (v) => `await redis.streams.ack('orders', '${v.group}', ...ids)`,
+    fields: [stream, { name: 'group', label: 'group', kind: 'text' }, { name: 'ids', label: 'ids', kind: 'token' }],
+    examples: [{ id: 'ack', title: 'Ack what I read', description: 'The ids of my last read: they leave the pending table. Returns how many were pending.', values: { stream: 'orders', group: 'billing', ids: '$last' } }],
+    call: (v) => `await redis.streams.ack(${q(v.stream)}, ${q(v.group)}, ...ids)`,
+    body: (v) => ({ stream: v.stream, group: v.group, ids: list(v.ids) }),
+  },
+  'streams.delete': {
+    fields: [stream, { name: 'ids', label: 'ids', kind: 'token' }],
+    examples: [
+      { id: 'delete', title: 'Delete an entry', description: 'XDEL: the entry leaves the stream and the follow pane’s next reads. Returns how many existed.', values: { stream: 'orders', ids: '$last' } },
+      { id: 'pending', title: 'Delete a pending entry, then recover', description: 'Delete an id worker-1 has not acked, then run “Recover pending”: it comes back with empty fields, and can still be acked.', values: { stream: 'orders', ids: '$last' } },
+    ],
+    call: (v) => `await redis.streams.delete(${q(v.stream)}, ...ids)`,
+    body: (v) => ({ stream: v.stream, ids: list(v.ids) }),
+  },
+  'streams.length': {
+    fields: [stream],
+    examples: [{ id: 'orders', title: 'How long is orders', description: 'XLEN: deleted entries no longer count.', values: { stream: 'orders' } }],
+    call: (v) => `await redis.streams.length(${q(v.stream)})`,
+    body: (v) => ({ stream: v.stream }),
   },
   'failover.drill': {
     fields: [

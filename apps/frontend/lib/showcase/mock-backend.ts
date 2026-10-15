@@ -1,6 +1,7 @@
-// Mock backend: in-memory stand-ins for the Fastify API's operation results until each section's real routes exist.
-// Everything here is fake; replace with calls to /api/:mode/.... (Status and the event log are live: see live.ts; an
-// operation whose spec has a request `body` runs for real: see api.ts.)
+// The module catalogue (MODULES, with each feature module's namespace for Reset section) and its icons, plus a mock
+// backend: in-memory stand-ins for the operations whose real routes don't exist yet (runOp: the session
+// section). Every operation whose spec has a request `body` runs for real: see api.ts; status and the event log are
+// live: see live.ts.
 import type { Mode } from '@showcase/contracts';
 import type { KeyTouched, RunResult } from './api';
 import type { Values } from './examples';
@@ -50,13 +51,8 @@ export const MODULES: ShowcaseModule[] = [
       { id: 'subscribe', label: 'subscribe' },
       { id: 'publish', label: 'publish' },
     ] },
-  { id: 'streams', label: 'Streams', kind: 'feature', blurb: 'Append, consumer groups, reads, acks.',
-    ops: [
-      { id: 'createGroup', label: 'createGroup' },
-      { id: 'add', label: 'add' },
-      { id: 'read', label: 'read' },
-      { id: 'ack', label: 'ack' },
-    ] },
+  { id: 'streams', label: 'Streams', kind: 'feature', namespace: 'showcase:stream', blurb: 'Append, consumer groups, reads, acks.',
+    ops: ['createGroup', 'add', 'read', 'ack', 'delete', 'length'].map((id) => ({ id, label: id })) },
   { id: 'failover', label: 'Failover', kind: 'mode-specific', onlyMode: 'sentinel', blurb: 'Move the master 6380 → 6381 and watch.',
     ops: [{ id: 'drill', label: 'failover drill' }] },
   { id: 'slots', label: 'Slots', kind: 'mode-specific', onlyMode: 'cluster', blurb: 'Key → hash slot → node, hash tags, fan-out.',
