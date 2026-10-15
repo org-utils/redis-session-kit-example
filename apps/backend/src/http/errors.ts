@@ -27,6 +27,10 @@ export class ModeUnavailableError extends Error {
 function packageStatus(code: string): number {
   if (code.endsWith('_INPUT')) return 400;
   if (code === 'SESSION_NOT_FOUND') return 404;
+  // A credential that can no longer authenticate (get(), touch(), update()…); SESSION_INVALID is also the package's
+  // answer to malformed input, such as a ttl over absoluteTimeout, so it stays a 400.
+  if (code === 'SESSION_EXPIRED' || code === 'SESSION_REVOKED' || code === 'SESSION_REPLAY') return 401;
+  if (code === 'SESSION_INVALID') return 400;
   if (code === 'SESSION_CONFLICT' || code === 'LOCK_HELD') return 409;
   if (code.endsWith('_LIMIT')) return 413;
   return 500;

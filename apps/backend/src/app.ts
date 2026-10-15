@@ -10,6 +10,7 @@ import { createEventLog, type NewEntry } from './redis/event-log.ts';
 import { createModeChecks } from './redis/mode-checks.ts';
 import { closeModeClients, connectionConfig, createModeClients } from './redis/mode-clients.ts';
 import { startTrace, type TraceRecording } from './redis/redis-trace.ts';
+import { createSessionMetrics, type SessionMetricsSink } from './redis/session-metrics.ts';
 import { createStatusMonitor } from './redis/status-monitor.ts';
 import { createTemporaryClients, type TemporaryClients } from './redis/temporary-clients.ts';
 import { cacheModule } from './modules/cache/plugin.ts';
@@ -17,6 +18,7 @@ import { clientModule } from './modules/client/plugin.ts';
 import { lockModule } from './modules/lock/plugin.ts';
 import { pubsubModule } from './modules/pubsub/plugin.ts';
 import { rateLimitModule } from './modules/rate-limit/plugin.ts';
+import { sessionModule } from './modules/session/plugin.ts';
 import { streamsModule } from './modules/streams/plugin.ts';
 
 /**
@@ -25,7 +27,13 @@ import { streamsModule } from './modules/streams/plugin.ts';
  * return the package's result as is; the mode scope sends it as `{ result, redis }`. Its GET routes are live views (a
  * lease, an SSE stream): untraced, sent as they are.
  */
-export type FeatureModule = FastifyPluginAsyncZod<{ client: RedisClient; temporaryClients: TemporaryClients; events: ModeEvents }>;
+export type FeatureModule = FastifyPluginAsyncZod<{
+  client: RedisClient;
+  temporaryClients: TemporaryClients;
+  events: ModeEvents;
+  /** The mode client's session metrics sink. */
+  sessionMetrics: SessionMetricsSink;
+}>;
 
 /** One mode's event log, for what a feature module notices in the background. */
 export interface ModeEvents {
@@ -42,6 +50,7 @@ declare module 'fastify' {
 /** The feature modules by name, which is also their path segment. */
 export const FEATURE_MODULES: Record<string, FeatureModule> = {
   client: clientModule,
+  session: sessionModule,
   cache: cacheModule,
   lock: lockModule,
   'rate-limit': rateLimitModule,
@@ -63,7 +72,9 @@ export async function buildApp({ config, logger = false, modules = FEATURE_MODUL
   app.decorateRequest('redisTrace', null);
 
   const eventLog = createEventLog();
+  const sessionMetrics = new Map(config.SHOWCASE_MODES.map((mode) => [mode, createSessionMetrics()]));
   const clients = createModeClients(config, {
+    sessionMetrics: (mode) => sessionMetrics.get(mode)!,
     onError(mode, error, { source, channel }) {
       app.log.warn({ mode, source, channel, err: error }, 'mode client error');
       const message = error instanceof Error ? error.message : String(error);
@@ -99,7 +110,7 @@ export async function buildApp({ config, logger = false, modules = FEATURE_MODUL
           if (!monitor.isAvailable(mode)) throw new ModeUnavailableError(mode);
         });
         // Every command an operation (a POST) sends is recorded; the response carries that trace as `redis`, beside the
-        // package's result (`{ result, redis }`) or the error (`{ error, redis }`).
+        // package's result (`{ result, redis }`, plus `setCookie` when it sets one) or the error (`{ error, redis }`).
         scope.addHook('preHandler', (request, _reply, done) => {
           if (request.method !== 'POST') return done();
           request.redisTrace = startTrace();
@@ -112,11 +123,15 @@ export async function buildApp({ config, logger = false, modules = FEATURE_MODUL
           // Fastify sends a string result (getValue on a cached string) as is, as text/plain: it is the result itself.
           const result = isJson(reply) ? JSON.parse(payload) : payload;
           reply.type('application/json; charset=utf-8');
-          return JSON.stringify({ result, redis });
+          // A cookie the response sets (a session login) is echoed as is, since the page can't read an HttpOnly one.
+          const setCookie = reply.getHeader('set-cookie');
+          return JSON.stringify({ result, redis, ...(typeof setCookie === 'string' && { setCookie }) });
         });
         const events: ModeEvents = { append: (entry) => eventLog.append(mode, entry) };
         for (const [name, module] of Object.entries(modules)) {
-          await scope.register(module, { client, temporaryClients, events, prefix: `/${name}` });
+          await scope.register(module, {
+            client, temporaryClients, events, sessionMetrics: sessionMetrics.get(mode)!, prefix: `/${name}`,
+          });
         }
       },
       { prefix: `/api/${mode}` },

@@ -12,6 +12,8 @@ export interface RunResult {
   body: unknown;
   keys: KeyTouched[]; commands: string[];
   omitted?: RedisTrace['omitted'];
+  /** The `Set-Cookie` the response carried (a session login), as the backend echoed it. */
+  setCookie?: string;
 }
 
 let runId = 0;
@@ -59,6 +61,7 @@ export async function runOperation(mode: Mode, module: string, op: string, reque
       keys: redis?.keys ?? [],
       commands: redis?.commands.map((c) => formatCommand(c, mode)) ?? [],
       ...(redis?.omitted && { omitted: redis.omitted }),
+      ...('setCookie' in parsed && parsed.setCookie !== undefined && { setCookie: parsed.setCookie }),
     };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);

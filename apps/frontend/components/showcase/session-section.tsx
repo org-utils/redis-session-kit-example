@@ -1,162 +1,141 @@
-// The session section: every session operation with editable examples, this browser's cookie and token wallet,
-// and a live table of the user's sessions on the selected connection mode.
+// The session section: log in (a fake login: any user id) and use the session with validate, get, touch and update,
+// each with editable examples. Beside the form, this browser's cookie for the mode and the last Set-Cookie the package
+// built; below, the session the package returned next to what Redis stores for it, which is ciphertext.
 'use client';
 
-import { Cookie, Play, Users } from 'lucide-react';
-import { useEffect, useState } from 'react';
+import { Cookie, Database, KeyRound } from 'lucide-react';
+import { useState } from 'react';
 import { Badge } from '@/components/ui/badge';
-import { Button } from '@/components/ui/button';
-import { Card, CardAction, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
-import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { runOperation, type RunResult } from '@/lib/showcase/api';
 import { spec, type Values } from '@/lib/showcase/examples';
-import type { Mode } from '@showcase/contracts';
-import type { RunResult } from '@/lib/showcase/api';
-import type { Status, useSessionLab } from '@/lib/showcase/mock-sessions';
-import { RequestForm, type TokenOption } from './request-form';
-import { HttpBadge, Json } from './result-display';
+import { perMode, useOnReset } from '@/lib/showcase/per-mode';
+import { usePolled } from '@/lib/showcase/use-polled';
+import { SessionCookieSchema, SessionStoredSchema, type Mode, type SessionCookie } from '@showcase/contracts';
+import { OpForm } from './op-form';
+import { Json } from './result-display';
 
-type Lab = ReturnType<typeof useSessionLab>;
-interface SectionProps { mode: Mode; lab: Lab; onResult: (r: RunResult) => void; last: RunResult | null }
+const OPS = ['create', 'validate', 'get', 'touch', 'update'];
 
-function useNow() {
-  const [n, setN] = useState(() => Math.floor(Date.now() / 1000));
-  useEffect(() => { const t = setInterval(() => setN(Math.floor(Date.now() / 1000)), 1000); return () => clearInterval(t); }, []);
-  return n;
-}
-const secs = (s: number) => (s <= 0 ? 'now' : s < 120 ? `${s}s` : s < 7200 ? `${Math.round(s / 60)}m` : `${Math.round(s / 3600)}h`);
+/** The fields of a session record this section uses; the rest is shown as returned. */
+interface Session { id: string; userId: string; [field: string]: unknown }
+/** Per mode: the last session the package returned (and from which call), and the last Set-Cookie a response carried. */
+interface Known { session: Session | null; from: string; setCookie: string | null }
 
-function StateBadge({ status, reason }: { status: Status | 'gone'; reason?: string }) {
-  if (reason && status === 'active') return <Badge className="bg-warning text-warning-foreground">{reason}</Badge>;
-  if (status === 'active') return <Badge className="bg-success text-success-foreground">active</Badge>;
-  if (status === 'consumed') return <Badge variant="secondary">consumed</Badge>;
-  if (status === 'revoked') return <Badge variant="destructive">revoked</Badge>;
-  return <Badge variant="outline">gone</Badge>;
-}
+const short = (token: string) => `${token.split('.')[0].slice(0, 8)}…`;
 
-function tokenOptions(lab: Lab): TokenOption[] {
-  return [
-    { value: '$cookie', label: `my cookie${lab.cookie ? ` (${lab.cookie.split('.')[0]})` : ' (none)'}` },
-    { value: '$previous', label: `token before the last rotation${lab.previous ? ` (${lab.previous.split('.')[0]})` : ' (none yet)'}` },
-    ...lab.wallet.map((w) => ({ value: w.token, label: `${w.jti} · ${w.label}` })),
-  ];
+/** The session in a successful result: create's and a valid validate's `session`, or get's and update's result itself. */
+function sessionIn(op: string, result: unknown): Session | null {
+  const r = result as { session?: Session; valid?: boolean } & Partial<Session> | null;
+  if (op === 'create' || op === 'validate') return r?.session ?? null;
+  if (op === 'get' || op === 'update') return r?.id && r.userId ? (r as Session) : null;
+  return null;
 }
 
-function BrowserCard({ mode, lab, last }: { mode: Mode; lab: Lab; last: RunResult | null }) {
-  const setCookie = (last as (RunResult & { setCookie?: string }) | null)?.setCookie;
+/** The stored value, pretty-printed when it is JSON (the encryption envelope is). */
+function pretty(value: string): string {
+  try {
+    return JSON.stringify(JSON.parse(value), null, 2);
+  } catch {
+    return value;
+  }
+}
+
+function BrowserCard({ mode, cookie, setCookie }: { mode: Mode; cookie: SessionCookie | null; setCookie: string | null }) {
   return (
     <Card size="sm">
       <CardHeader>
         <CardTitle className="flex items-center gap-2 text-sm"><Cookie className="size-4" /> This browser · {mode}</CardTitle>
-        <CardDescription>What the cookie holds, and every token this browser was ever given.</CardDescription>
+        <CardDescription>The cookie is HttpOnly, so the page can&apos;t read it: the backend reports what the request carried.</CardDescription>
       </CardHeader>
       <CardContent className="space-y-3">
         <div className="space-y-1">
-          <div className="text-xs text-muted-foreground">Cookie <span className="font-mono">showcase_session_{mode}</span></div>
-          <code className="block break-all rounded-md bg-code p-2 font-mono text-xs text-code-foreground">{lab.cookie ?? '(not set)'}</code>
+          <div className="text-xs text-muted-foreground">Cookie <span className="font-mono">{cookie?.name ?? '…'}</span></div>
+          <code className="block break-all rounded-md bg-code p-2 font-mono text-xs text-code-foreground">
+            {!cookie ? 'reading…' : cookie.value ?? '(not set)'}
+          </code>
         </div>
-        {setCookie && (
-          <div className="space-y-1">
-            <div className="text-xs text-muted-foreground">Last Set-Cookie (from <span className="font-mono">sessions.cookie()</span>)</div>
-            <code className="block break-all rounded-md bg-code p-2 font-mono text-xs text-code-foreground">{setCookie}</code>
-          </div>
-        )}
         <div className="space-y-1">
-          <div className="text-xs text-muted-foreground">Token wallet</div>
-          {lab.wallet.length ? (
-            <ul className="space-y-0.5 font-mono text-xs">
-              {lab.wallet.map((w) => {
-                const c = lab.sim.check(w.token);
-                return (
-                  <li key={w.token} className="flex items-center gap-2">
-                    <span className="text-code-key">{w.jti}</span><span className="truncate text-muted-foreground">{w.label}</span>
-                    <span className="ml-auto">{c.valid ? <StateBadge status="active" /> : <Badge variant="outline">{c.reason}</Badge>}</span>
-                  </li>
-                );
-              })}
-            </ul>
-          ) : <p className="text-xs text-muted-foreground">Log in to get a token.</p>}
+          <div className="text-xs text-muted-foreground">Last Set-Cookie (from <span className="font-mono">sessions.cookie()</span>)</div>
+          <code className="block break-all rounded-md bg-code p-2 font-mono text-xs text-code-foreground">{setCookie ?? '(none yet: log in)'}</code>
         </div>
       </CardContent>
     </Card>
   );
 }
 
-/** ACTIVE → CONSUMED / REVOKED, EXPIRED derived, any → DELETED; lights up the last transition. */
-function ResultCard({ r }: { r: RunResult | null }) {
-  if (!r) return null;
+/** The session as the package returned it, next to the record as Redis holds it (native GET + TTL, re-read every second). */
+function StoredCard({ mode, known, refresh }: { mode: Mode; known: Known & { session: Session }; refresh: number }) {
+  const { session, from } = known;
+  const stored = usePolled(
+    `/api/${mode}/session/stored?${new URLSearchParams({ userId: session.userId, id: session.id })}`, SessionStoredSchema, 1000, refresh,
+  );
   return (
     <Card size="sm">
-      <CardHeader className="flex flex-row items-center justify-between">
-        <CardTitle className="font-mono text-sm">sessions.{r.op}()</CardTitle>
-        <div className="flex items-center gap-2 font-mono text-xs text-muted-foreground">{r.latencyMs}ms <HttpBadge code={r.httpStatus} /></div>
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2 text-sm"><KeyRound className="size-4" /> {session.userId}&apos;s session on {mode}</CardTitle>
+        <CardDescription>
+          Session encryption is on (AES-256-GCM, key version v1): Redis holds only ciphertext, and the package decrypts it.
+        </CardDescription>
       </CardHeader>
-      <CardContent><Json value={r.body} /></CardContent>
+      <CardContent className="grid grid-cols-1 gap-4 @3xl:grid-cols-2">
+        <div className="min-w-0 space-y-1">
+          <div className="text-xs text-muted-foreground">
+            Decrypted, as <span className="font-mono">sessions.{from}()</span> returned it. A later touch rewrites the
+            record without returning it: run get to decrypt it again.
+          </div>
+          <Json value={session} />
+        </div>
+        <div className="min-w-0 space-y-1">
+          <div className="flex items-center gap-2 text-xs text-muted-foreground">
+            <Database className="size-3.5" /> Stored, read with a native GET (not a package call)
+            {stored && <Badge variant="outline" className="ml-auto font-mono">{stored.value === null ? 'gone' : stored.ttl === null ? 'no expiry' : `TTL ${stored.ttl}s`}</Badge>}
+          </div>
+          <div className="break-all font-mono text-[11px] text-muted-foreground">{stored?.key ?? 'reading…'}</div>
+          {stored && (
+            <pre className="overflow-x-auto whitespace-pre-wrap break-all rounded-md bg-code p-3 font-mono text-xs leading-relaxed text-code-foreground">
+              {stored.value === null ? '(nil): the key is gone' : pretty(stored.value)}
+            </pre>
+          )}
+        </div>
+      </CardContent>
     </Card>
   );
 }
 
-function useOpForm(op: string) {
-  const s = spec('session', op);
-  const [exampleId, setExampleId] = useState(s.examples[0].id);
-  const [values, setValues] = useState<Values>(s.examples[0].values);
-  useEffect(() => { setExampleId(s.examples[0].id); setValues(s.examples[0].values); }, [op]); // eslint-disable-line react-hooks/exhaustive-deps
-  const example = s.examples.find((e) => e.id === exampleId);
-  const modified = !example || JSON.stringify(values) !== JSON.stringify(example.values);
-  return { s, exampleId, setExampleId, values, setValues, example, modified };
-}
+export function SessionSection({ mode, resets, onResult }: { mode: Mode; resets: Record<Mode, number>; onResult: (r: RunResult) => void }) {
+  const [known, setKnown] = useState(() => perMode<Known>(() => ({ session: null, from: '', setCookie: null })));
+  // Reset section deleted every record: the session shown is gone. The last Set-Cookie still is what the browser was told.
+  useOnReset(resets, (m) => setKnown((k) => ({ ...k, [m]: { ...k[m], session: null, from: '' } })));
+  // Bumped after every run, so the cookie and the stored record are re-read straight away.
+  const [runs, setRuns] = useState(0);
+  const cookie = usePolled(`/api/${mode}/session/cookie`, SessionCookieSchema, 5000, runs);
 
-const OPS = ['create', 'validate', 'get', 'touch', 'update', 'rotate', 'revoke', 'destroy', 'setSecurityVersion', 'revokeAll', 'list'];
+  const run = async (op: string, v: Values) => {
+    const at = mode;
+    const r = await runOperation(at, 'session', op, () => spec('session', op).body!(v));
+    const session = r.httpStatus === 200 ? sessionIn(op, r.body) : null;
+    setKnown((k) => ({
+      ...k,
+      [at]: { ...(session ? { session, from: op } : k[at]), setCookie: r.setCookie ?? k[at].setCookie },
+    }));
+    setRuns((n) => n + 1);
+    return r;
+  };
+  const tokens = [{ value: '$cookie', label: `my cookie${cookie?.value ? ` (${short(cookie.value)})` : ' (none)'}` }];
+  const current = known[mode];
 
-export function SessionSection({ mode, lab, onResult, last }: SectionProps) {
-  const [op, setOp] = useState('create');
-  const f = useOpForm(op);
-  const now = useNow();
-  const user = 'user-42';
-  const listed = lab.sim.all(user).live;
   return (
-    <div className="space-y-5">
-      <Tabs value={op} onValueChange={setOp}>
-        <TabsList variant="line" className="h-auto flex-wrap">{OPS.map((o) => <TabsTrigger key={o} value={o} className="font-mono">{o}</TabsTrigger>)}</TabsList>
-      </Tabs>
+    <div className="space-y-4">
       <div className="grid grid-cols-1 gap-4 @5xl:grid-cols-[minmax(0,1fr)_22rem]">
-        <div className="space-y-4">
-          <RequestForm spec={f.s} values={f.values} modified={f.modified} onChange={f.setValues} tokens={tokenOptions(lab)}
-            selected={f.modified ? null : f.exampleId} onPick={(e) => { f.setExampleId(e.id); f.setValues(e.values); }}
-            onReset={() => f.example && f.setValues(f.example.values)}
-            footer={<Button onClick={() => onResult(lab.run(op, f.values))}><Play /> Run on {mode}</Button>} />
-          <ResultCard r={last} />
-        </div>
-        <BrowserCard mode={mode} lab={lab} last={last} />
+        <OpForm module="session" ops={OPS} mode={mode} tokens={tokens} onRun={run} onResult={onResult} />
+        <BrowserCard mode={mode} cookie={cookie} setCookie={current.setCookie} />
       </div>
-      <Card size="sm">
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2 text-sm"><Users className="size-4" /> {user}&apos;s sessions on {mode}</CardTitle>
-          <CardDescription>Every record Redis holds for this user, tombstones included. Countdowns use the server clock.</CardDescription>
-        </CardHeader>
-        <CardContent>
-          <Table className="text-xs">
-            <TableHeader><TableRow><TableHead>session</TableHead><TableHead>device</TableHead><TableHead>state</TableHead><TableHead>version</TableHead><TableHead>idle left</TableHead><TableHead>expires in</TableHead><TableHead>chain</TableHead></TableRow></TableHeader>
-            <TableBody>
-              {listed.map((r) => {
-                const c = lab.sim.check(r.token);
-                return (
-                  <TableRow key={r.jti}>
-                    <TableCell className="font-mono text-code-key">{r.jti}{r.token === lab.cookie && <Badge variant="outline" className="ml-2"><Cookie /> cookie</Badge>}</TableCell>
-                    <TableCell>{r.deviceId}</TableCell>
-                    <TableCell><StateBadge status={r.status} reason={!c.valid && r.status === 'active' ? c.reason : undefined} /></TableCell>
-                    <TableCell className="font-mono">v{r.version} · sv{r.securityVersion}</TableCell>
-                    <TableCell className="font-mono">{r.status === 'active' && r.idleExpiresAt ? secs(r.idleExpiresAt - now) : '—'}</TableCell>
-                    <TableCell className="font-mono">{r.tombstoneUntil ? `tombstone ${secs(r.tombstoneUntil - now)}` : secs(Math.min(r.expiresAt, r.absoluteAt) - now)}</TableCell>
-                    <TableCell className="font-mono text-muted-foreground">{r.predecessorJti && `← ${r.predecessorJti}`} {r.successorJti && `→ ${r.successorJti}`}</TableCell>
-                  </TableRow>
-                );
-              })}
-              {!listed.length && <TableRow><TableCell colSpan={7} className="text-muted-foreground">No sessions yet. Run “Log in on a laptop”.</TableCell></TableRow>}
-            </TableBody>
-          </Table>
-        </CardContent>
-      </Card>
+      {current.session ? (
+        <StoredCard mode={mode} known={{ ...current, session: current.session }} refresh={runs} />
+      ) : (
+        <p className="text-sm text-muted-foreground">Log in (create) to see the session next to what Redis stores for it.</p>
+      )}
     </div>
   );
 }

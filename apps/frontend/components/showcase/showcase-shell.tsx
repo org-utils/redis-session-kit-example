@@ -23,9 +23,8 @@ import { cn } from '@/lib/utils';
 import { spec, type Values } from '@/lib/showcase/examples';
 import { MODES, type Mode, type StatusResponse } from '@showcase/contracts';
 import { runOperation, type RunResult } from '@/lib/showcase/api';
-import { MODE_ICON, MODULES, MODULE_ICON, modeText, runOp } from '@/lib/showcase/mock-backend';
+import { MODE_ICON, MODULES, MODULE_ICON, modeText } from '@/lib/showcase/mock-backend';
 import { formatLatency, healthDot, healthText, useLive } from '@/lib/showcase/live';
-import { useSessionLab } from '@/lib/showcase/mock-sessions';
 import { perMode } from '@/lib/showcase/per-mode';
 import { RequestForm } from './request-form';
 import { CliSnippet, Commands, HttpBadge, InsightLink, Json, KeysTable, ModeName } from './result-display';
@@ -38,11 +37,11 @@ import { SlotsSection } from './slots-section';
 import { StreamsSection } from './streams-section';
 
 export function ShowcaseShell({ initialStatus }: { initialStatus: StatusResponse | null }) {
-  // ?module=<id> opens a section directly.
+  // ?module=<id> opens a section directly; the showcase opens on Session.
   const params = useSearchParams();
   const { status, events, stream } = useLive(initialStatus);
   const [mode, setMode] = useState<Mode>('standalone');
-  const [moduleId, setModuleId] = useState(MODULES.some((m) => m.id === params.get('module')) ? params.get('module')! : 'cache');
+  const [moduleId, setModuleId] = useState(MODULES.some((m) => m.id === params.get('module')) ? params.get('module')! : 'session');
   const mod = MODULES.find((m) => m.id === moduleId)!;
   const [opId, setOpId] = useState(mod.ops[0].id);
   const op = mod.ops.find((o) => o.id === opId) ?? mod.ops[0];
@@ -57,7 +56,6 @@ export function ShowcaseShell({ initialStatus }: { initialStatus: StatusResponse
   };
   const [compare, setCompare] = useState(false);
   const [results, setResults] = useState<RunResult[]>([]);
-  const lab = useSessionLab(mode);
 
   const pickModule = (id: string) => {
     const m = MODULES.find((x) => x.id === id)!;
@@ -68,7 +66,7 @@ export function ShowcaseShell({ initialStatus }: { initialStatus: StatusResponse
   const run = async () => {
     const modes = compare ? MODES : [mode];
     const { body } = opSpec;
-    if (!body) return setResults(modes.map((md) => runOp(md, moduleId, op.id, values, status[md])));
+    if (!body) return;
     setRunning(true);
     setResults(await Promise.all(modes.map((md) => runOperation(md, moduleId, op.id, () => body(values)))));
     setRunning(false);
@@ -190,7 +188,7 @@ export function ShowcaseShell({ initialStatus }: { initialStatus: StatusResponse
                 )}
               </div>
               {moduleId === 'session' ? (
-                <SessionSection mode={mode} lab={lab} last={results[0] ?? null} onResult={(r) => setResults([r])} />
+                <SessionSection mode={mode} resets={resets} onResult={(r) => setResults([r])} />
               ) : moduleId === 'failover' ? (
                 <FailoverSection />
               ) : moduleId === 'slots' ? (

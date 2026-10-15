@@ -1,11 +1,7 @@
-// The module catalogue (MODULES, with each feature module's namespace for Reset section) and its icons, plus a mock
-// backend: in-memory stand-ins for the operations whose real routes don't exist yet (runOp: the session
-// section). Every operation whose spec has a request `body` runs for real: see api.ts; status and the event log are
-// live: see live.ts.
+// The module catalogue (MODULES, with each feature module's namespace for Reset section) and its icons, plus the slot
+// helpers the slots section's stand-in still uses. Every feature module operation runs for real: see api.ts; status and
+// the event log are live: see live.ts.
 import type { Mode } from '@showcase/contracts';
-import type { KeyTouched, RunResult } from './api';
-import type { Values } from './examples';
-import type { ModeView } from './live';
 import {
   ArrowLeftRight, Eye, Gauge, Grid3x3, KeyRound, Layers, Lock, Network, Plug, Radio, Server, Waves, type LucideIcon,
 } from 'lucide-react';
@@ -28,8 +24,8 @@ export const MODULES: ShowcaseModule[] = [
       { id: 'raw', label: 'raw commands' },
       { id: 'shutdown', label: 'shutdown' },
     ] },
-  { id: 'session', label: 'Session', kind: 'feature', blurb: 'Opaque credentials, rotation chains, replay, revoke, expiry.',
-    ops: ['create', 'validate', 'get', 'touch', 'update', 'rotate', 'revoke', 'destroy', 'setSecurityVersion', 'revokeAll', 'list'].map((id) => ({ id, label: id })) },
+  { id: 'session', label: 'Session', kind: 'feature', namespace: 'showcase:session', blurb: 'Opaque credentials in a cookie, encrypted records, idle and absolute expiry.',
+    ops: ['create', 'validate', 'get', 'touch', 'update'].map((id) => ({ id, label: id })) },
   { id: 'cache', label: 'Cache', kind: 'feature', namespace: 'showcase:cache', blurb: 'JSON values with TTL and conditional writes.',
     ops: ['set', 'get', 'has', 'ttl', 'setIfAbsent', 'delete', 'clear'].map((id) => ({ id, label: id })) },
   { id: 'lock', label: 'Lock', kind: 'feature', namespace: 'showcase:lock', blurb: 'Ownership-token leases.',
@@ -78,42 +74,6 @@ export function slotOf(key: string): number {
 }
 export function nodeOf(slot: number): string {
   return slot <= 5460 ? '127.0.0.1:7001' : slot <= 10922 ? '127.0.0.1:7002' : '127.0.0.1:7003';
-}
-
-let runId = 0;
-const err = (code: string, name: string, message: string, mode: Mode) => ({ error: { code, name, message, mode } });
-
-export function runOp(mode: Mode, moduleId: string, opId: string, v: Values, status: ModeView): RunResult {
-  const input = Object.values(v).map(String).join(' · ');
-  const base = { id: ++runId, at: new Date().toLocaleTimeString(), mode, module: moduleId, op: opId, input,
-    latencyMs: +((status.latencyMs ?? 1) * (1 + Math.random())).toFixed(2) };
-  const k = (key: string, type: string, ttl: number | null): KeyTouched =>
-    mode === 'cluster' ? { key, type, ttl, slot: slotOf(key), node: nodeOf(slotOf(key)) } : { key, type, ttl };
-  const ok = (body: unknown, keys: KeyTouched[], commands: string[], httpStatus = 200): RunResult => ({ ...base, httpStatus, body, keys, commands });
-  const fail = (httpStatus: number, code: string, name: string, message: string, commands: string[] = []): RunResult =>
-    ({ ...base, httpStatus, body: err(code, name, message, mode), keys: [], commands });
-
-  if (!status.available) return fail(503, 'MODE_UNAVAILABLE', 'ModeUnavailableError', `${mode} is unavailable`);
-
-  switch (`${moduleId}.${opId}`) {
-    case 'session.create': {
-      if (String(v.metadata).length > 200) return fail(413, 'SESSION_LIMIT', 'SessionLimitError', 'metadata exceeds maxMetadataBytes (8192)');
-      const u = 'a3f9…c21e';
-      return ok({ token: 'kq3J…x9Q', session: { userId: v.userId, deviceId: v.deviceId, jti: 'j_7f2a', version: 1, status: 'active' },
-        setCookie: `showcase_session_${mode}=kq3J…x9Q; Path=/; HttpOnly; SameSite=Lax` },
-        [k(`showcase:session:session:{${u}}:9be1…`, 'string', 2592000), k(`showcase:session:user-sessions:{${u}}`, 'zset', 2592000), k('showcase:session:token-index:9be1…', 'string', 2592000)],
-        ['EVALSHA create.lua 3 …']);
-    }
-    case 'session.rotate':
-      if (String(v.token).includes('previous')) return fail(409, 'SESSION_REPLAY', 'SessionReplayError', 'credential belongs to a consumed session', ['EVALSHA rotate.lua …']);
-      return ok({ token: 'Pz8w…3Lk', previousJti: 'j_7f2a', session: { jti: 'j_91bc', status: 'active' } }, [], ['EVALSHA rotate.lua …']);
-    case 'session.revokeAll': {
-      const lim = Number(v.limit);
-      return ok({ affected: Math.min(lim, 2), remaining: Math.max(0, 2 - lim) }, [], ['ZRANGE …', 'EVALSHA revoke.lua …']);
-    }
-    default:
-      return ok({ ok: true, note: 'stubbed' }, [], [`(${moduleId}.${opId})`]);
-  }
 }
 
 export const modeText: Record<Mode, string> = {

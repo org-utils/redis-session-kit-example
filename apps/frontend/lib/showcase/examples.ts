@@ -36,6 +36,9 @@ const lane: Field = { name: 'lane', label: 'holder', kind: 'select', options: ['
 const lockName: Field = { name: 'name', label: 'name', kind: 'text' };
 const stream: Field = { name: 'stream', label: 'stream', kind: 'text' };
 const subject: Field = { name: 'subject', label: 'subject', kind: 'text' };
+/** A credential: `$cookie` sends none, so the backend presents this mode's cookie, as a real request would. */
+const sessionToken: Field = { name: 'token', label: 'token', kind: 'token' };
+const sessionTokenBody = (v: Values) => ({ token: v.token === '$cookie' ? undefined : String(v.token) });
 const lockTtl: Field = { name: 'ttl', label: 'ttl (seconds)', kind: 'number', help: 'blank: the default lease, 30 s (maxTtl 300)' };
 
 export const OPS: Record<string, OpSpec> = {
@@ -160,47 +163,60 @@ export const OPS: Record<string, OpSpec> = {
       { name: 'deviceId', label: 'deviceId', kind: 'text' },
       { name: 'securityVersion', label: 'securityVersion', kind: 'number' },
       { name: 'metadata', label: 'metadata (JSON)', kind: 'json' },
-      { name: 'idleTimeout', label: 'idleTimeout (s, blank = config)', kind: 'number' },
-      { name: 'absoluteTimeout', label: 'absoluteTimeout (s, blank = config)', kind: 'number' },
+      { name: 'ttl', label: 'ttl (s)', kind: 'number', help: 'blank: the configured 3600 s; at most absoluteTimeout' },
+      { name: 'idleTimeout', label: 'idleTimeout (s)', kind: 'number', help: 'blank: the configured 900 s' },
+      { name: 'absoluteTimeout', label: 'absoluteTimeout (s)', kind: 'number', help: 'blank: the configured 3600 s' },
     ],
     examples: [
-      { id: 'browser', title: 'Log in on a laptop', description: 'Fake login: no password. Sets this mode\'s cookie.', values: { userId: 'user-42', deviceId: 'laptop', securityVersion: 1, metadata: '{ "plan": "pro" }', idleTimeout: '', absoluteTimeout: '' } },
-      { id: 'phone', title: 'Same user on a phone', description: 'A second session in the user\'s session set.', values: { userId: 'user-42', deviceId: 'phone', securityVersion: 1, metadata: '{}', idleTimeout: '', absoluteTimeout: '' } },
-      { id: 'idle', title: 'Watch an idle timeout', description: 'idleTimeout 20 s: stop touching it and it fails with idle_timeout.', values: { userId: 'user-42', deviceId: 'kiosk', securityVersion: 1, metadata: '{}', idleTimeout: 20, absoluteTimeout: '' } },
-      { id: 'absolute', title: 'Watch an absolute timeout', description: 'absoluteTimeout 45 s: touching cannot save it.', values: { userId: 'user-42', deviceId: 'kiosk', securityVersion: 1, metadata: '{}', idleTimeout: '', absoluteTimeout: 45 } },
+      { id: 'browser', title: 'Log in on a laptop', description: 'Fake login: no password. Sets this mode\'s cookie.', values: { userId: 'user-42', deviceId: 'laptop', securityVersion: 1, metadata: '{ "plan": "pro" }', ttl: '', idleTimeout: '', absoluteTimeout: '' } },
+      { id: 'phone', title: 'Same user on a phone', description: 'A second session in the user\'s session set; the cookie now holds this one.', values: { userId: 'user-42', deviceId: 'phone', securityVersion: 1, metadata: '{}', ttl: '', idleTimeout: '', absoluteTimeout: '' } },
+      { id: 'idle', title: 'Watch an idle timeout', description: 'idleTimeout 20 s: leave it alone and validate answers idle_timeout.', values: { userId: 'user-42', deviceId: 'kiosk', securityVersion: 1, metadata: '{}', ttl: '', idleTimeout: 20, absoluteTimeout: '' } },
+      { id: 'absolute', title: 'Watch an absolute timeout', description: 'Idle 20 s, absolute 45 s (and ttl 45: it may not exceed absoluteTimeout). Touching keeps it past 20 s, but at 45 s Redis expires the record: not_found.', values: { userId: 'user-42', deviceId: 'kiosk', securityVersion: 1, metadata: '{}', ttl: 45, idleTimeout: 20, absoluteTimeout: 45 } },
+      { id: 'too-long', title: 'Absolute timeout under the ttl', description: 'absoluteTimeout 45 s with the configured ttl of 3600 s: SESSION_INVALID.', values: { userId: 'user-42', deviceId: 'kiosk', securityVersion: 1, metadata: '{}', ttl: '', idleTimeout: '', absoluteTimeout: 45 } },
     ],
-    call: (v) => `await redis.sessions.create({ userId: ${q(v.userId)}, deviceId: ${q(v.deviceId)}, securityVersion: ${v.securityVersion}, metadata: ${json(v.metadata)}${v.idleTimeout !== '' ? `, idleTimeout: ${v.idleTimeout}` : ''}${v.absoluteTimeout !== '' ? `, absoluteTimeout: ${v.absoluteTimeout}` : ''} })`,
+    call: (v) => `await redis.sessions.create({ userId: ${q(v.userId)}, deviceId: ${q(v.deviceId)}, securityVersion: ${v.securityVersion}, metadata: ${json(v.metadata)}${['ttl', 'idleTimeout', 'absoluteTimeout'].filter((f) => v[f] !== '').map((f) => `, ${f}: ${v[f]}`).join('')}, ipAddress, userAgent })`,
+    body: (v) => ({
+      userId: v.userId, deviceId: blank(v.deviceId), securityVersion: optional(v.securityVersion), metadata: parse(v.metadata, 'metadata'),
+      ttl: optional(v.ttl), idleTimeout: optional(v.idleTimeout), absoluteTimeout: optional(v.absoluteTimeout),
+    }),
   },
   'session.validate': {
-    fields: [{ name: 'token', label: 'token', kind: 'token' }],
+    fields: [sessionToken],
     examples: [
       { id: 'cookie', title: 'Validate my cookie', description: '{ valid: true, session } or { valid: false, reason }. Never throws for a bad credential.', values: { token: '$cookie' } },
-      { id: 'old', title: 'Validate a replaced token', description: 'The token from before the last rotation answers consumed.', values: { token: '$previous' } },
-      { id: 'junk', title: 'A made-up token', description: 'not_found.', values: { token: 'j_fake.0000' } },
+      { id: 'unknown', title: 'A well-formed stranger', description: 'Looks like a token, but no locator knows it: not_found.', values: { token: 'AAAAAAAAAAAAAAAAAAAAAA.BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB' } },
+      { id: 'junk', title: 'A made-up token', description: 'Fails the format check before Redis is asked: invalid, and no command sent.', values: { token: 'j_fake.0000' } },
     ],
     call: (v) => `await redis.sessions.validate(${tok(v.token)})`,
+    body: sessionTokenBody,
   },
   'session.get': {
-    fields: [{ name: 'token', label: 'token', kind: 'token' }],
-    examples: [{ id: 'cookie', title: 'Get or throw', description: 'Same check as validate, but throws a typed Session*Error.', values: { token: '$cookie' } }],
+    fields: [sessionToken],
+    examples: [
+      { id: 'cookie', title: 'Get or throw', description: 'Same check as validate, but returns the session or throws a typed Session*Error.', values: { token: '$cookie' } },
+      { id: 'unknown', title: 'Get a stranger', description: 'SessionNotFoundError (404).', values: { token: 'AAAAAAAAAAAAAAAAAAAAAA.BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB' } },
+    ],
     call: (v) => `await redis.sessions.get(${tok(v.token)})`,
+    body: sessionTokenBody,
   },
   'session.touch': {
-    fields: [{ name: 'token', label: 'token', kind: 'token' }],
+    fields: [sessionToken],
     examples: [
-      { id: 'touch', title: 'Touch on a request', description: 'Extends the idle expiry; at most once per touchInterval (10 s).', values: { token: '$cookie' } },
-      { id: 'twice', title: 'Touch again straight away', description: 'Within touchInterval: no write, touched: false.', values: { token: '$cookie' } },
+      { id: 'touch', title: 'Touch on a request', description: 'Once touchInterval (10 s) has passed since the last access, moves the idle expiry on: the stored ciphertext changes.', values: { token: '$cookie' } },
+      { id: 'twice', title: 'Touch again straight away', description: 'Within touchInterval: no write. touch() returns nothing either way; the commands and the stored value tell.', values: { token: '$cookie' } },
     ],
     call: (v) => `await redis.sessions.touch(${tok(v.token)})`,
+    body: sessionTokenBody,
   },
   'session.update': {
-    fields: [{ name: 'token', label: 'token', kind: 'token' }, { name: 'metadata', label: 'metadata patch (JSON)', kind: 'json' }, { name: 'expectedVersion', label: 'expectedVersion (blank = none)', kind: 'number' }],
+    fields: [sessionToken, { name: 'metadata', label: 'metadata (JSON, replaces the stored metadata)', kind: 'json' }, { name: 'expectedVersion', label: 'expectedVersion', kind: 'number', help: 'blank: none, last write wins' }],
     examples: [
-      { id: 'theme', title: 'Save a preference', description: 'Bumps version. No expectedVersion: last write wins.', values: { token: '$cookie', metadata: '{ "theme": "dark" }', expectedVersion: '' } },
-      { id: 'cas', title: 'Optimistic update', description: 'With the current version (1 after login) it succeeds…', values: { token: '$cookie', metadata: '{ "theme": "light" }', expectedVersion: 1 } },
-      { id: 'stale', title: 'Stale version', description: '…run it twice: the second sees a newer version and gets SESSION_CONFLICT.', values: { token: '$cookie', metadata: '{ "theme": "light" }', expectedVersion: 1 } },
+      { id: 'theme', title: 'Save a preference', description: 'Bumps version. No expectedVersion: last write wins.', values: { token: '$cookie', metadata: '{ "plan": "pro", "theme": "dark" }', expectedVersion: '' } },
+      { id: 'cas', title: 'Optimistic update', description: 'With the current version (1 after login) it succeeds…', values: { token: '$cookie', metadata: '{ "plan": "pro", "theme": "light" }', expectedVersion: 1 } },
+      { id: 'stale', title: 'Stale version', description: '…run it again: the session is at a newer version now, so SESSION_CONFLICT (409).', values: { token: '$cookie', metadata: '{ "plan": "pro", "theme": "light" }', expectedVersion: 1 } },
     ],
     call: (v) => `await redis.sessions.update(${tok(v.token)}, { metadata: ${json(v.metadata)} }${v.expectedVersion !== '' ? `, ${v.expectedVersion}` : ''})`,
+    body: (v) => ({ ...sessionTokenBody(v), metadata: parse(v.metadata, 'metadata'), expectedVersion: optional(v.expectedVersion) }),
   },
   'session.rotate': {
     fields: [{ name: 'token', label: 'token', kind: 'token' }],
