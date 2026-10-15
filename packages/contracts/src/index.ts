@@ -130,6 +130,25 @@ export const CacheSetIfAbsentRequestSchema = z.object({ key: z.string(), value: 
 export const CacheDeleteRequestSchema = z.object({ keys: z.array(z.string()) });
 export const CacheClearRequestSchema = z.object({ pattern: z.string().optional() });
 
+/* ───────────── client: POST /api/:mode/client/<operation> ───────────── */
+
+/** `health(options)` on the mode client. Blank fields fall back to the package's defaults (1000 ms, 100 ms). */
+export const ClientHealthRequestSchema = z.object({ timeoutMs: z.number().optional(), degradedMs: z.number().optional() });
+
+/** One raw command on the mode client, outside every namespace: keys are full Redis keys. */
+export const ClientRawRequestSchema = z.discriminatedUnion('command', [
+  z.object({ command: z.literal('mget'), keys: z.array(z.string()) }),
+  z.object({ command: z.literal('exists'), keys: z.array(z.string()) }),
+  /** One GET per key, in one pipeline. */
+  z.object({ command: z.literal('pipeline'), keys: z.array(z.string()) }),
+  z.object({ command: z.literal('eval'), script: z.string(), keys: z.array(z.string()), args: z.array(z.string()) }),
+  // The cluster-safe ones: they group keys by slot, or scan every master.
+  z.object({ command: z.literal('mgetClusterAware'), keys: z.array(z.string()) }),
+  z.object({ command: z.literal('del'), keys: z.array(z.string()) }),
+  z.object({ command: z.literal('scanCluster'), pattern: z.string() }),
+  z.object({ command: z.literal('deletePatternClusterAware'), pattern: z.string() }),
+]);
+
 /* ───────────── errors: every non-2xx response ───────────── */
 
 export const ErrorBodySchema = z.object({

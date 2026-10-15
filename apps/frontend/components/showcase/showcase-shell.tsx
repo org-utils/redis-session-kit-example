@@ -66,9 +66,10 @@ export function ShowcaseShell({ initialStatus }: { initialStatus: StatusResponse
   const [running, setRunning] = useState(false);
   const run = async () => {
     const modes = compare ? MODES : [mode];
-    if (!mod.live) return setResults(modes.map((md) => runOp(md, moduleId, op.id, values, status[md])));
+    const { body } = opSpec;
+    if (!body) return setResults(modes.map((md) => runOp(md, moduleId, op.id, values, status[md])));
     setRunning(true);
-    setResults(await Promise.all(modes.map((md) => runOperation(md, moduleId, op.id, () => opSpec.body!(values)))));
+    setResults(await Promise.all(modes.map((md) => runOperation(md, moduleId, op.id, () => body(values)))));
     setRunning(false);
   };
   const resetSection = async () => {
@@ -175,11 +176,11 @@ export function ShowcaseShell({ initialStatus }: { initialStatus: StatusResponse
                   <h1 className="text-2xl font-semibold tracking-tight">{mod.label}</h1>
                   <p className="text-sm text-muted-foreground">{mod.blurb}</p>
                 </div>
-                {mod.live && (
+                {mod.namespace && (
                   <div className="flex max-w-72 flex-col items-end gap-1 text-right">
                     <Button variant="outline" size="sm" onClick={resetSection} disabled={running}><Eraser /> Reset section</Button>
                     <span className="text-xs text-muted-foreground">
-                      A showcase convenience, not a package call: deletes <code className="font-mono">{mod.live.namespace}:*</code> on {mode}.
+                      A showcase convenience, not a package call: deletes <code className="font-mono">{mod.namespace}:*</code> on {mode}.
                     </span>
                   </div>
                 )}

@@ -37,11 +37,12 @@ export const OPS: Record<string, OpSpec> = {
       { name: 'degradedMs', label: 'degradedMs', kind: 'number', help: 'slower than this counts as degraded' },
     ],
     examples: [
-      { id: 'default', title: 'Default probe', description: 'The package defaults: 1000 ms timeout, 100 ms degraded.', values: { timeoutMs: 1000, degradedMs: 100 } },
+      { id: 'default', title: 'Default probe', description: 'The package defaults: 1000 ms timeout, 100 ms degraded. On cluster, one entry per master.', values: { timeoutMs: 1000, degradedMs: 100 } },
       { id: 'strict', title: 'Strict readiness probe', description: 'Tight limits a load balancer might use.', values: { timeoutMs: 200, degradedMs: 1 } },
       { id: 'tolerant', title: 'Tolerant liveness probe', description: 'Only fail when Redis is really gone.', values: { timeoutMs: 3000, degradedMs: 500 } },
     ],
     call: (v) => `await redis.health({ timeoutMs: ${v.timeoutMs}, degradedMs: ${v.degradedMs} })`,
+    body: (v) => ({ timeoutMs: optional(v.timeoutMs), degradedMs: optional(v.degradedMs) }),
   },
   'client.collide': {
     fields: [
@@ -55,14 +56,43 @@ export const OPS: Record<string, OpSpec> = {
     ],
     call: (v) => `createRedisClient({ ...conn, cache: { enabled: true, namespace: ${q(v.cache)} }, sessions: { enabled: true, namespace: ${q(v.sessions)} } })`,
   },
-  'client.mget': {
-    fields: [{ name: 'keys', label: 'keys (comma separated)', kind: 'text' }],
-    examples: [
-      { id: 'cross', title: 'Keys in different slots', description: 'Fine on standalone and sentinel; CROSSSLOT on cluster.', values: { keys: 'a, b, c' } },
-      { id: 'tag', title: 'Same slot via hash tag', description: '{user:42} puts every key in one slot, so cluster accepts it.', values: { keys: '{user:42}:a, {user:42}:b' } },
-      { id: 'aware', title: 'Use mgetClusterAware instead', description: 'Groups keys by slot and fans out; works everywhere.', values: { keys: 'a, b, c' } },
+  'client.raw': {
+    fields: [
+      { name: 'command', label: 'command', kind: 'select', options: ['mget', 'exists', 'eval', 'pipeline', 'mgetClusterAware', 'del', 'scanCluster', 'deletePatternClusterAware'] },
+      { name: 'keys', label: 'keys (comma separated)', kind: 'text', help: 'full Redis keys: raw commands skip every namespace' },
+      { name: 'pattern', label: 'pattern', kind: 'text', help: 'scanCluster and deletePatternClusterAware only' },
+      { name: 'script', label: 'script (eval only)', kind: 'json' },
     ],
-    call: (v) => `await redis.mget(${list(v.keys).map(q).join(', ')})`,
+    examples: [
+      { id: 'mget-cross', title: 'mget across slots', description: 'Two slots: the values on standalone and sentinel, CROSSSLOT (502) from Redis on cluster. Run the cache section’s “Cache a user profile” and “Short-lived value” first to see values (the second expires in 5 s).', values: { command: 'mget', keys: 'showcase:cache:user:42, showcase:cache:otp:42', pattern: '', script: '' } },
+      { id: 'mget-tag', title: 'mget with a hash tag', description: 'Only {user:42} is hashed, so both keys share a slot: works on every mode.', values: { command: 'mget', keys: 'showcase:client:{user:42}:profile, showcase:client:{user:42}:cart', pattern: '', script: '' } },
+      { id: 'exists-cross', title: 'exists across slots', description: 'Counts the keys that exist (run the cache examples above it first); CROSSSLOT on cluster, like mget.', values: { command: 'exists', keys: 'showcase:cache:user:42, showcase:cache:otp:42', pattern: '', script: '' } },
+      { id: 'aware', title: 'mgetClusterAware', description: 'Works everywhere: on cluster the package sends one MGET per slot and keeps your key order. user:1 is never written (null); it is here because it lives on another node.', values: { command: 'mgetClusterAware', keys: 'showcase:cache:user:42, showcase:cache:user:1, showcase:cache:otp:42', pattern: '', script: '' } },
+      { id: 'pipeline-cross', title: 'pipeline across nodes', description: 'One GET per key in one pipeline (user:1 sits on another node and reads null). On cluster ioredis refuses keys on different nodes before sending anything (502); keys in different slots on one node are fine.', values: { command: 'pipeline', keys: 'showcase:cache:user:42, showcase:cache:user:1', pattern: '', script: '' } },
+      { id: 'eval', title: 'Two-key eval', description: 'A script declaring two keys in different slots: CROSSSLOT on cluster, the values elsewhere (after the cache examples named in “mget across slots”).', values: { command: 'eval', keys: 'showcase:cache:user:42, showcase:cache:otp:42', pattern: '', script: "return redis.call('MGET', KEYS[1], KEYS[2])" } },
+      { id: 'del-cross', title: 'del across slots', description: 'Works on every mode: on cluster the package groups the keys and sends one DEL per slot.', values: { command: 'del', keys: 'showcase:cache:user:42, showcase:cache:otp:42, showcase:cache:user:missing', pattern: '', script: '' } },
+      { id: 'scan', title: 'scanCluster', description: 'Every showcase key; on cluster it scans every master.', values: { command: 'scanCluster', keys: '', pattern: 'showcase:*', script: '' } },
+      { id: 'delete-pattern', title: 'deletePatternClusterAware', description: 'SCAN + DEL of the whole cache namespace, per master on cluster, never a cross-slot DEL.', values: { command: 'deletePatternClusterAware', keys: '', pattern: 'showcase:cache:*', script: '' } },
+    ],
+    call: (v) => {
+      const keys = list(v.keys).map(q).join(', ');
+      switch (v.command) {
+        case 'eval': return `await redis.eval(${JSON.stringify(String(v.script))}, ${list(v.keys).length}, ${keys})`;
+        case 'pipeline': return `await redis.pipeline()${list(v.keys).map((k) => `.get(${q(k)})`).join('')}.exec()`;
+        case 'mgetClusterAware': return `await redis.mgetClusterAware([${keys}])`;
+        case 'scanCluster':
+        case 'deletePatternClusterAware': return `await redis.${v.command}(${q(v.pattern)})`;
+        default: return `await redis.${v.command}(${keys})`;
+      }
+    },
+    body: (v) => {
+      switch (v.command) {
+        case 'eval': return { command: v.command, script: v.script, keys: list(v.keys), args: [] };
+        case 'scanCluster':
+        case 'deletePatternClusterAware': return { command: v.command, pattern: v.pattern };
+        default: return { command: v.command, keys: list(v.keys) };
+      }
+    },
   },
 
   'session.create': {

@@ -1,6 +1,6 @@
 // Mock backend: in-memory stand-ins for the Fastify API's operation results until each section's real routes exist.
-// Everything here is fake; replace with calls to /api/:mode/.... (Status and the event log are live: see live.ts; the
-// cache section runs for real: see api.ts.)
+// Everything here is fake; replace with calls to /api/:mode/.... (Status and the event log are live: see live.ts; an
+// operation whose spec has a request `body` runs for real: see api.ts.)
 import type { Mode } from '@showcase/contracts';
 import type { KeyTouched, RunResult } from './api';
 import type { Values } from './examples';
@@ -13,20 +13,20 @@ export type ModuleKind = 'feature' | 'mode-specific';
 export interface Op { id: string; label: string }
 export interface ShowcaseModule {
   id: string; label: string; kind: ModuleKind; onlyMode?: Mode; blurb: string; ops: Op[];
-  /** Runs against the real backend (api.ts) rather than the stand-ins below; Reset section deletes `<namespace>:*`. */
-  live?: { namespace: string };
+  /** The module's keys, which Reset section deletes (`<namespace>:*`); modules without one have no Reset. */
+  namespace?: string;
 }
 
 export const MODULES: ShowcaseModule[] = [
   { id: 'client', label: 'Client', kind: 'feature', blurb: 'Config validation, namespaces, raw commands, health, shutdown.',
     ops: [
       { id: 'health', label: 'health()' },
+      { id: 'raw', label: 'raw commands' },
       { id: 'collide', label: 'namespace collision' },
-      { id: 'mget', label: 'raw mget' },
     ] },
   { id: 'session', label: 'Session', kind: 'feature', blurb: 'Opaque credentials, rotation chains, replay, revoke, expiry.',
     ops: ['create', 'validate', 'get', 'touch', 'update', 'rotate', 'revoke', 'destroy', 'setSecurityVersion', 'revokeAll', 'list'].map((id) => ({ id, label: id })) },
-  { id: 'cache', label: 'Cache', kind: 'feature', live: { namespace: 'showcase:cache' }, blurb: 'JSON values with TTL and conditional writes.',
+  { id: 'cache', label: 'Cache', kind: 'feature', namespace: 'showcase:cache', blurb: 'JSON values with TTL and conditional writes.',
     ops: ['set', 'get', 'has', 'ttl', 'setIfAbsent', 'delete', 'clear'].map((id) => ({ id, label: id })) },
   { id: 'lock', label: 'Lock', kind: 'feature', blurb: 'Ownership-token leases.',
     ops: [
@@ -97,25 +97,12 @@ export function runOp(mode: Mode, moduleId: string, opId: string, v: Values, sta
   if (!status.available) return fail(503, 'MODE_UNAVAILABLE', 'ModeUnavailableError', `${mode} is unavailable`);
 
   switch (`${moduleId}.${opId}`) {
-    case 'client.health': {
-      const latency = status.latencyMs ?? 0;
-      const st = latency > Number(v.degradedMs) ? 'degraded' : status.health;
-      return ok(mode === 'cluster'
-        ? { status: st, latencyMs: 1.4, nodes: ['7001', '7002', '7003'].map((p) => ({ address: `127.0.0.1:${p}`, status: 'healthy', latencyMs: 1.1 })) }
-        : { status: st, latencyMs: latency }, [], mode === 'cluster' ? ['PING → 7001', 'PING → 7002', 'PING → 7003'] : ['PING']);
-    }
     case 'client.collide': {
       const a = String(v.cache), c = String(v.sessions);
       const collide = a === c || a.startsWith(`${c}:`) || c.startsWith(`${a}:`);
       return collide
         ? fail(500, 'REDIS_CONFIGURATION', 'RedisConfigurationError', `Namespaces "${c}" (sessions) and "${a}" (cache) overlap`)
         : ok({ created: true, config: { cache: { namespace: a }, sessions: { namespace: c } } }, [], []);
-    }
-    case 'client.mget': {
-      const keys = String(v.keys).split(',').map((x) => x.trim()).filter(Boolean);
-      const sameSlot = new Set(keys.map(slotOf)).size <= 1;
-      if (mode === 'cluster' && !sameSlot) return fail(502, 'CROSSSLOT', 'ReplyError', "CROSSSLOT Keys in request don't hash to the same slot", [`MGET ${keys.join(' ')}`]);
-      return ok(keys.map(() => null), keys.map((x) => k(x, 'none', null)), [`MGET ${keys.join(' ')}`]);
     }
     case 'session.create': {
       if (String(v.metadata).length > 200) return fail(413, 'SESSION_LIMIT', 'SessionLimitError', 'metadata exceeds maxMetadataBytes (8192)');
