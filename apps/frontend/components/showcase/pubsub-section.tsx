@@ -9,15 +9,16 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { cn } from '@/lib/utils';
 import type { Values } from '@/lib/showcase/examples';
 import type { Mode } from '@showcase/contracts';
-import { usePubSubSim } from '@/lib/showcase/mock-live';
+import { usePubSubSim, simulated } from '@/lib/showcase/mock-live';
 import { OpForm } from './op-form';
 
 export function PubSubSection({ mode }: { mode: Mode }) {
   const ps = usePubSubSim(mode);
-  const run = (op: string, v: Values) => {
+  const runSim = (op: string, v: Values): unknown => {
     if (op === 'subscribe') { ps.subscribe(String(v.channel)); return { subscribed: v.channel }; }
     return ps.publish(String(v.channel), String(v.message)).returned;
   };
+  const run = (op: string, v: Values) => simulated(mode, 'pubsub', op, runSim(op, v));
   return (
     <div className="space-y-4">
       <Card size="sm">

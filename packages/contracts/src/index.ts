@@ -70,8 +70,12 @@ export const EventLogEntrySchema = z.object({
   id: z.number(),
   ts: z.number(),
   mode: ModeSchema,
-  /** `error`: something a mode client reported through `onError`. `health`: the mode's health changed. */
-  kind: z.enum(['error', 'health']),
+  /**
+   * `error`: something a mode client reported through `onError`. `health`: the mode's health changed. `showcase`:
+   * something the showcase noticed that the package does not report (a release inside `lock.using()` that found the
+   * lease already gone).
+   */
+  kind: z.enum(['error', 'health', 'showcase']),
   /** The `onError` source (`connection`, `subscriber`, …), or `health`. */
   source: z.string(),
   channel: z.string().optional(),
@@ -197,6 +201,30 @@ export const ClientStepSchema = z.discriminatedUnion('ok', [
   }),
 ]);
 export type ClientStep = z.infer<typeof ClientStepSchema>;
+
+/* ───────────── lock: POST /api/:mode/lock/<operation>, GET /api/:mode/lock/lease ───────────── */
+
+// The package validates the ttl itself (LOCK_INPUT, LOCK_LIMIT); a blank ttl is left out, so its defaultTtl applies.
+export const LockAcquireRequestSchema = z.object({ name: z.string(), ttl: z.number().optional() });
+export const LockExtendRequestSchema = z.object({ name: z.string(), token: z.string(), ttl: z.number().optional() });
+export const LockReleaseRequestSchema = z.object({ name: z.string(), token: z.string() });
+export const LockUsingRequestSchema = z.object({
+  name: z.string(),
+  /** How long the callback works while holding the lock, in seconds. The request stays open meanwhile. */
+  work: z.number().positive().max(60),
+  ttl: z.number().optional(),
+});
+
+/** The lease as Redis holds it: native GET and PTTL on the lock key, not a package call. */
+export const LockLeaseQuerySchema = z.object({ name: z.string() });
+export const LockLeaseSchema = z.object({
+  key: z.string(),
+  /** The ownership token stored in the key, or null when nobody holds the lock. */
+  token: z.string().nullable(),
+  /** Milliseconds left on the lease, or null when nobody holds the lock. */
+  ttlMs: z.number().nullable(),
+});
+export type LockLease = z.infer<typeof LockLeaseSchema>;
 
 /* ───────────── errors: every non-2xx response ───────────── */
 

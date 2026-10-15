@@ -8,7 +8,7 @@ import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle }
 import { cn } from '@/lib/utils';
 import type { Values } from '@/lib/showcase/examples';
 import type { Mode } from '@showcase/contracts';
-import { RL, useRateSim } from '@/lib/showcase/mock-live';
+import { RL, useRateSim, simulated } from '@/lib/showcase/mock-live';
 import { OpForm } from './op-form';
 
 const secs = (ms: number) => `${Math.max(0, ms / 1000).toFixed(1)}s`;
@@ -17,13 +17,14 @@ export function RateLimitSection({ mode }: { mode: Mode }) {
   const rate = useRateSim();
   const { win, now, log } = rate;
   const count = win?.count ?? 0;
-  const run = (op: string, v: Values) => {
+  const runSim = (op: string, v: Values): unknown => {
     if (op === 'consume') return rate.consume(String(v.subject), Number(v.cost));
     if (op === 'check') return rate.check();
     if (op === 'reset') return rate.reset();
     rate.burst(String(v.subject), Number(v.n));
     return { sent: Number(v.n), note: 'watch the window fill' };
   };
+  const run = (op: string, v: Values) => simulated(mode, 'rate-limit', op, runSim(op, v));
   return (
     <div className="grid grid-cols-1 gap-4 @5xl:grid-cols-[minmax(0,1fr)_26rem]">
       <OpForm module="rate-limit" ops={['consume', 'check', 'reset', 'burst']} mode={mode} onRun={run} />

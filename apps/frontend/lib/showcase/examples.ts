@@ -29,6 +29,10 @@ const parse = (s: Value, field: string) => {
 /** A number field left blank means "not given", so the package's default applies. */
 const optional = (s: Value) => (s === '' ? undefined : Number(s));
 const cacheTtl = { name: 'ttl', label: 'ttl (seconds)', kind: 'number', help: 'blank: the default TTL, 300 s' } as const;
+/** The lock section's holder: which lane runs the operation and keeps its tokens. Not sent to the backend. */
+const lane: Field = { name: 'lane', label: 'holder', kind: 'select', options: ['A', 'B'] };
+const lockName: Field = { name: 'name', label: 'name', kind: 'text' };
+const lockTtl: Field = { name: 'ttl', label: 'ttl (seconds)', kind: 'number', help: 'blank: the default lease, 30 s (maxTtl 300)' };
 
 export const OPS: Record<string, OpSpec> = {
   'client.health': {
@@ -312,38 +316,44 @@ export const OPS: Record<string, OpSpec> = {
   },
 
   'lock.acquire': {
-    fields: [{ name: 'lane', label: 'holder', kind: 'select', options: ['A', 'B'] }, { name: 'name', label: 'name', kind: 'text' }, { name: 'ttl', label: 'ttl (seconds)', kind: 'number' }],
+    fields: [lane, lockName, lockTtl],
     examples: [
-      { id: 'a', title: 'Nightly report job (A)', description: 'A 30 s lease from holder A.', values: { lane: 'A', name: 'report:nightly', ttl: 30 } },
-      { id: 'b', title: '…then from B', description: 'Refused while A holds it, but B still gets a token.', values: { lane: 'B', name: 'report:nightly', ttl: 30 } },
-      { id: 'short', title: 'Sub-second lease', description: 'TTLs may be fractional.', values: { lane: 'A', name: 'report:nightly', ttl: 0.5 } },
-      { id: 'limit', title: 'Over maxTtl', description: '600 s → LOCK_LIMIT.', values: { lane: 'A', name: 'migration', ttl: 600 } },
+      { id: 'a', title: 'Nightly report job (A)', description: 'A 30 s lease from holder A → acquired, with its token.', values: { lane: 'A', name: 'report:nightly', ttl: 30 } },
+      { id: 'b', title: '…then from B', description: 'Refused while A holds it (acquired: false), but B still gets a token of its own.', values: { lane: 'B', name: 'report:nightly', ttl: 30 } },
+      { id: 'default', title: 'Default lease', description: 'ttl left blank: the package’s defaultTtl, 30 s. Release A’s lease first, or it is refused.', values: { lane: 'A', name: 'report:nightly', ttl: '' } },
+      { id: 'short', title: 'Sub-second lease', description: 'TTLs may be fractional (whole milliseconds): cart:42 for 0.5 s.', values: { lane: 'A', name: 'cart:42', ttl: 0.5 } },
+      { id: 'limit', title: 'Over maxTtl', description: '600 s is over maxTtl (300 s) → LOCK_LIMIT, nothing sent.', values: { lane: 'A', name: 'migration', ttl: 600 } },
     ],
-    call: (v) => `await redis.lock.acquire('${v.name}', ${v.ttl})   // holder ${v.lane}`,
+    call: (v) => `await redis.lock.acquire(${q(v.name)}${v.ttl !== '' ? `, ${v.ttl}` : ''})   // holder ${v.lane}`,
+    body: (v) => ({ name: v.name, ttl: optional(v.ttl) }),
   },
   'lock.extend': {
-    fields: [{ name: 'lane', label: 'holder', kind: 'select', options: ['A', 'B'] }, { name: 'token', label: 'token', kind: 'token' }, { name: 'ttl', label: 'ttl (seconds)', kind: 'number' }],
+    fields: [lane, lockName, { name: 'token', label: 'token', kind: 'token' }, lockTtl],
     examples: [
-      { id: 'mine', title: 'Extend my lease', description: 'Resets the lease to ttl; it does not add to it.', values: { lane: 'A', token: '$A', ttl: 30 } },
-      { id: 'refused', title: 'With the refused token', description: 'B\'s token from a refused acquire → false.', values: { lane: 'B', token: '$B', ttl: 30 } },
+      { id: 'mine', title: 'Extend my lease', description: 'With A’s token → true. Resets the lease to ttl; it does not add to it.', values: { lane: 'A', name: 'report:nightly', token: '$A', ttl: 30 } },
+      { id: 'refused', title: 'With the refused token', description: 'B’s token from “…then from B” never owned the lock → false.', values: { lane: 'B', name: 'report:nightly', token: '$B', ttl: 30 } },
+      { id: 'expired', title: 'After it expired', description: 'Run “Sub-second lease” (acquire) first: half a second later its token owns nothing → false.', values: { lane: 'A', name: 'cart:42', token: '$A', ttl: 30 } },
     ],
-    call: (v) => `await redis.lock.extend('report:nightly', token, ${v.ttl})`,
+    call: (v) => `await redis.lock.extend(${q(v.name)}, token${v.ttl !== '' ? `, ${v.ttl}` : ''})   // holder ${v.lane}`,
+    body: (v) => ({ name: v.name, token: v.token, ttl: optional(v.ttl) }),
   },
   'lock.release': {
-    fields: [{ name: 'lane', label: 'holder', kind: 'select', options: ['A', 'B'] }, { name: 'token', label: 'token', kind: 'token' }],
+    fields: [lane, lockName, { name: 'token', label: 'token', kind: 'token' }],
     examples: [
-      { id: 'mine', title: 'With my token', description: 'Compare-and-delete → true.', values: { lane: 'A', token: '$A' } },
-      { id: 'theirs', title: 'With the other lane\'s token', description: '→ false; the lock survives.', values: { lane: 'B', token: '$B' } },
+      { id: 'mine', title: 'With my token', description: 'Compare-and-delete with A’s token → true; the lease is free.', values: { lane: 'A', name: 'report:nightly', token: '$A' } },
+      { id: 'theirs', title: 'With the other lane’s token', description: 'B’s token → false; A’s lock survives.', values: { lane: 'B', name: 'report:nightly', token: '$B' } },
     ],
-    call: () => `await redis.lock.release('report:nightly', token)`,
+    call: (v) => `await redis.lock.release(${q(v.name)}, token)   // holder ${v.lane}`,
+    body: (v) => ({ name: v.name, token: v.token }),
   },
   'lock.using': {
-    fields: [{ name: 'lane', label: 'holder', kind: 'select', options: ['A', 'B'] }, { name: 'work', label: 'work (seconds)', kind: 'number' }, { name: 'ttl', label: 'ttl (seconds)', kind: 'number' }],
+    fields: [lane, lockName, { name: 'work', label: 'work (seconds)', kind: 'number', help: 'the callback holds the lock this long, server-side' }, lockTtl],
     examples: [
-      { id: 'hold', title: 'Hold for 10 s', description: 'The other lane is refused meanwhile; a second using → LOCK_HELD.', values: { lane: 'A', work: 10, ttl: 30 } },
-      { id: 'outlast', title: 'Work outlasts the lease', description: 'work 8 s, ttl 3: B can acquire mid-work; the release fails into the event log.', values: { lane: 'A', work: 8, ttl: 3 } },
+      { id: 'hold', title: 'Hold for 10 s', description: 'The other lane is refused meanwhile; a second using → LOCK_HELD (409). Released when the work ends.', values: { lane: 'A', name: 'report:nightly', work: 10, ttl: 30 } },
+      { id: 'outlast', title: 'Work outlasts the lease', description: 'work 8 s, ttl 3: B can acquire mid-work, and the release that finds the lease gone shows in the event log as lock-release.', values: { lane: 'A', name: 'report:nightly', work: 8, ttl: 3 } },
     ],
-    call: (v) => `await redis.lock.using('report:nightly', async () => work(${v.work}s), ${v.ttl})`,
+    call: (v) => `await redis.lock.using(${q(v.name)}, async (token) => { await work(${v.work}); return { token, workedSeconds: ${v.work} } }${v.ttl !== '' ? `, ${v.ttl}` : ''})`,
+    body: (v) => ({ name: v.name, work: Number(v.work), ttl: optional(v.ttl) }),
   },
   'rate-limit.consume': {
     fields: [{ name: 'subject', label: 'subject', kind: 'text' }, { name: 'cost', label: 'cost', kind: 'number' }],
