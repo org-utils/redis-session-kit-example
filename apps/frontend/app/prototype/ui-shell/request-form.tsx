@@ -33,7 +33,9 @@ export function ExamplePicker({ examples, selected, onPick }: { examples: Exampl
   );
 }
 
-function FieldInput({ field, value, onChange }: { field: Field; value: Value; onChange: (v: Value) => void }) {
+export interface TokenOption { value: string; label: string }
+
+function FieldInput({ field, value, onChange, tokens }: { field: Field; value: Value; onChange: (v: Value) => void; tokens?: TokenOption[] }) {
   const id = `f-${field.name}`;
   switch (field.kind) {
     case 'json':
@@ -49,13 +51,28 @@ function FieldInput({ field, value, onChange }: { field: Field; value: Value; on
           <SelectContent>{field.options!.map((o) => <SelectItem key={o} value={o} className="font-mono">{o}</SelectItem>)}</SelectContent>
         </Select>
       );
+    case 'token': {
+      const known = tokens?.some((t) => t.value === value);
+      return (
+        <div className="col-span-2 flex gap-2">
+          <Select value={known ? String(value) : '$custom'} onValueChange={(v) => onChange(v === '$custom' ? '' : v)}>
+            <SelectTrigger id={id} className="w-64 font-mono"><SelectValue /></SelectTrigger>
+            <SelectContent>
+              {tokens?.map((t) => <SelectItem key={t.value} value={t.value} className="font-mono">{t.label}</SelectItem>)}
+              <SelectItem value="$custom">type a token…</SelectItem>
+            </SelectContent>
+          </Select>
+          {!known && <Input value={String(value)} onChange={(e) => onChange(e.target.value)} placeholder="j_xxxx.secret" className="font-mono" />}
+        </div>
+      );
+    }
     default:
       return <Input id={id} value={String(value)} onChange={(e) => onChange(e.target.value)} className="font-mono" />;
   }
 }
 
-export function RequestForm({ spec, values, modified, onChange, onReset, footer }: {
-  spec: OpSpec; values: Values; modified: boolean; onChange: (v: Values) => void; onReset: () => void; footer: ReactNode;
+export function RequestForm({ spec, values, modified, onChange, onReset, footer, tokens }: {
+  spec: OpSpec; values: Values; modified: boolean; onChange: (v: Values) => void; onReset: () => void; footer: ReactNode; tokens?: TokenOption[];
 }) {
   return (
     <Card>
@@ -70,9 +87,9 @@ export function RequestForm({ spec, values, modified, onChange, onReset, footer 
       <CardContent className="space-y-4">
         <div className="grid grid-cols-2 gap-4">
           {spec.fields.map((f) => (
-            <div key={f.name} className={cn('space-y-1.5', f.kind === 'json' && 'col-span-2', f.kind === 'boolean' && 'col-span-2 flex items-center gap-3 space-y-0')}>
+            <div key={f.name} className={cn('space-y-1.5', (f.kind === 'json' || f.kind === 'token') && 'col-span-2', f.kind === 'boolean' && 'col-span-2 flex items-center gap-3 space-y-0')}>
               <Label htmlFor={`f-${f.name}`} className={cn('font-mono text-xs', f.kind === 'boolean' && 'order-last')}>{f.label}</Label>
-              <FieldInput field={f} value={values[f.name] ?? ''} onChange={(v) => onChange({ ...values, [f.name]: v })} />
+              <FieldInput field={f} value={values[f.name] ?? ''} tokens={tokens} onChange={(v) => onChange({ ...values, [f.name]: v })} />
               {f.help && f.kind !== 'boolean' && <p className="text-xs text-muted-foreground">{f.help}</p>}
             </div>
           ))}

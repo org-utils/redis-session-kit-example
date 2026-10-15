@@ -3,7 +3,7 @@
 
 import { ChevronsUpDown, Database, Play } from 'lucide-react';
 import { useSearchParams } from 'next/navigation';
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { ThemeToggle } from '@/components/theme-toggle';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -22,6 +22,9 @@ import { cn } from '@/lib/utils';
 import { CliSnippet, Commands, HttpBadge, InsightLink, Json, KeysTable, ModeName } from './bits';
 import { spec, type Values } from './examples';
 import { ExamplePicker, RequestForm } from './request-form';
+import { SESSION_VARIANTS } from './session-section';
+import { useSessionLab } from './session-sim';
+import { PrototypeSwitcher } from '@/components/prototype-switcher';
 import { MODES, MODE_ICON, MODULES, MODULE_ICON, healthDot, healthText, modeText, runOp, useStubLive, type Mode, type RunResult } from './stub';
 
 export const name = 'Sidebar, one mode at a time';
@@ -47,6 +50,23 @@ export function VariantA() {
   };
   const [compare, setCompare] = useState(false);
   const [results, setResults] = useState<RunResult[]>([]);
+  const lab = useSessionLab(mode);
+  const sessionKey = params.get('session') ?? '1';
+  const SessionVariant = (SESSION_VARIANTS.find((v) => v.key === sessionKey) ?? SESSION_VARIANTS[0]).C;
+  // PROTOTYPE: ?seed=1 plays a short scene on load (for screenshots and a quick look at a busy board).
+  const labRef = useRef(lab); labRef.current = lab;
+  const seeded = useRef(false);
+  useEffect(() => {
+    if (params.get('seed') !== '1' || moduleId !== 'session' || seeded.current) return;
+    seeded.current = true;
+    const ex = (op: string, id: string) => spec('session', op).examples.find((e) => e.id === id)!.values;
+    const steps: Array<[string, Values]> = [
+      ['create', ex('create', 'browser')], ['touch', ex('touch', 'touch')], ['update', ex('update', 'theme')],
+      ['rotate', ex('rotate', 'current')], ['create', ex('create', 'phone')], ['create', ex('create', 'idle')],
+      ['rotate', ex('rotate', 'replay')],
+    ];
+    steps.forEach(([op, v], n) => setTimeout(() => setResults([labRef.current.run(op, v)]), 80 * (n + 1)));
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const pickModule = (id: string) => {
     const m = MODULES.find((x) => x.id === id)!;
@@ -146,12 +166,15 @@ export function VariantA() {
         </header>
 
         <div className="flex min-h-0 flex-1">
-          <ScrollArea className="min-w-0 flex-1">
-            <div className="space-y-5 p-6">
+          <ScrollArea className="min-w-0 flex-1 [&_[data-slot=scroll-area-viewport]>div]:block!">
+            <div className="@container space-y-5 p-6">
               <div>
                 <h1 className="text-2xl font-semibold tracking-tight">{mod.label}</h1>
                 <p className="text-sm text-muted-foreground">{mod.blurb}</p>
               </div>
+              {moduleId === 'session' ? (
+                <SessionVariant mode={mode} lab={lab} last={results[0] ?? null} onResult={(r) => setResults([r])} />
+              ) : (<>
               <Tabs value={op.id} onValueChange={(v) => loadOp(moduleId, v)}>
                 <TabsList variant="line">
                   {mod.ops.map((o) => <TabsTrigger key={o.id} value={o.id} className="font-mono">{o.label}</TabsTrigger>)}
@@ -184,6 +207,7 @@ export function VariantA() {
                 ))}
                 {!results.length && <p className="text-sm text-muted-foreground">Run an operation to see its result here.</p>}
               </div>
+              </>)}
             </div>
           </ScrollArea>
 
@@ -237,6 +261,7 @@ export function VariantA() {
           </CollapsibleContent>
         </Collapsible>
       </SidebarInset>
+      {moduleId === 'session' && <PrototypeSwitcher param="session" variants={SESSION_VARIANTS} />}
     </SidebarProvider>
   );
 }
