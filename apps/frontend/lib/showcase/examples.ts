@@ -44,6 +44,17 @@ export const OPS: Record<string, OpSpec> = {
     call: (v) => `await redis.health({ timeoutMs: ${v.timeoutMs}, degradedMs: ${v.degradedMs} })`,
     body: (v) => ({ timeoutMs: optional(v.timeoutMs), degradedMs: optional(v.degradedMs) }),
   },
+  'client.validate': {
+    fields: [{ name: 'config', label: 'config (JSON)', kind: 'json', help: 'the whole createRedisClient config, on a temporary client' }],
+    examples: [
+      { id: 'sentinel-name', title: 'Sentinel without a master name', description: 'No name: REDIS_CONFIGURATION (500) before anything connects, so no commands. The same on every mode: the config names its own.', values: { config: '{ "mode": "sentinel", "sentinels": [{ "host": "127.0.0.1", "port": 26379 }] }' } },
+      { id: 'cluster-nodes', title: 'Cluster with no nodes', description: 'An empty node list: REDIS_CONFIGURATION before connecting.', values: { config: '{ "mode": "cluster", "nodes": [] }' } },
+      { id: 'port', title: 'Port 70000', description: 'Out of range: REDIS_CONFIGURATION before connecting.', values: { config: '{ "mode": "standalone", "host": "127.0.0.1", "port": 70000 }' } },
+      { id: 'lock-ttl', title: 'Lock defaultTtl above maxTtl', description: 'Each module section is checked too: LOCK_CONFIGURATION before connecting.', values: { config: '{ "mode": "standalone", "lock": { "enabled": true, "namespace": "app:lock", "defaultTtl": 600, "maxTtl": 300 } }' } },
+    ],
+    call: (v) => `createRedisClient(${json(v.config)})\n// the showcase adds lazyConnect: true, so a config the package accepts is closed before it connects`,
+    body: (v) => ({ config: parse(v.config, 'config') }),
+  },
   'client.collide': {
     fields: [
       { name: 'cache', label: 'cache namespace', kind: 'text' },
@@ -52,9 +63,31 @@ export const OPS: Record<string, OpSpec> = {
     examples: [
       { id: 'prefix', title: 'Prefix overlap', description: '"app" is a colon-prefix of "app:cache": rejected before connecting.', values: { cache: 'app:cache', sessions: 'app' } },
       { id: 'equal', title: 'Same namespace', description: 'Two modules writing the same keys: rejected.', values: { cache: 'shared', sessions: 'shared' } },
-      { id: 'safe', title: 'Similar but safe', description: '"app" and "application" do not collide.', values: { cache: 'application', sessions: 'app' } },
+      { id: 'safe', title: 'Similar but safe', description: '"app" and "application" do not collide: a temporary client is created on this mode, then closed.', values: { cache: 'application', sessions: 'app' } },
     ],
     call: (v) => `createRedisClient({ ...conn, cache: { enabled: true, namespace: ${q(v.cache)} }, sessions: { enabled: true, namespace: ${q(v.sessions)} } })`,
+    body: (v) => ({ cache: v.cache, sessions: v.sessions }),
+  },
+  'client.with': {
+    fields: [
+      { name: 'method', label: 'method', kind: 'select', options: ['withCache', 'withLock', 'withRateLimit', 'withPubSub', 'withStreams', 'withSessions'] },
+      { name: 'options', label: 'options (JSON)', kind: 'json' },
+      { name: 'replace', label: "replace: pass 'replace' instead of merging", kind: 'boolean' },
+      { name: 'whileSubscribed', label: 'whileSubscribed: subscribe first', kind: 'boolean' },
+    ],
+    examples: [
+      { id: 'merge', title: 'Merge', description: 'Only defaultTtl changes; then a set without a ttl gets 5 s (with-demo in the cache namespace).', values: { method: 'withCache', options: '{ "defaultTtl": 5 }', replace: false, whileSubscribed: false } },
+      { id: 'replace', title: 'Replace', description: 'Every field not given resets to its default, so enabled is false again and cache throws REDIS_CONFIGURATION.', values: { method: 'withCache', options: '{ "defaultTtl": 5 }', replace: true, whileSubscribed: false } },
+      { id: 'collide', title: 'Colliding override', description: 'The lock would share the cache namespace: REDIS_CONFIGURATION, and the lock config in effect is kept.', values: { method: 'withLock', options: '{ "namespace": "showcase:cache" }', replace: false, whileSubscribed: false } },
+      { id: 'subscribed', title: 'While subscribed', description: 'Reconfiguring would drop a live subscription, so withPubSub() throws PUBSUB_STATE.', values: { method: 'withPubSub', options: '{}', replace: false, whileSubscribed: true } },
+    ],
+    call: (v) => [
+      '// a temporary client configured like the mode client',
+      v.whileSubscribed && "await redis.pubsub.subscribe('orders.created', handler)",
+      `redis.${v.method}(${json(v.options)}${v.replace ? ", 'replace'" : ''})`,
+      v.method === 'withCache' && "await redis.cache.set('with-demo', 'merged')\nawait redis.cache.ttl('with-demo')  // only if the set succeeds",
+    ].filter(Boolean).join('\n'),
+    body: (v) => ({ method: v.method, options: parse(v.options, 'options'), replace: v.replace === true, whileSubscribed: v.whileSubscribed === true }),
   },
   'client.raw': {
     fields: [
@@ -93,6 +126,24 @@ export const OPS: Record<string, OpSpec> = {
         default: return { command: v.command, keys: list(v.keys) };
       }
     },
+  },
+
+  'client.shutdown': {
+    fields: [
+      { name: 'liveWork', label: 'liveWork: a subscription and a blocked stream read', kind: 'boolean' },
+      { name: 'closeTwice', label: 'closeTwice: call close() again', kind: 'boolean' },
+    ],
+    examples: [
+      { id: 'live', title: 'Close with live work', description: 'close() ends the blocked read at once (Connection is closed.), the subscription hears nothing more, and a subscribe afterwards rejects. On cluster PUBLISH counts only the subscribers on the node that took it, so its count can read 0.', values: { liveWork: true, closeTwice: false } },
+      { id: 'twice', title: 'Close twice', description: 'close() is idempotent: the second one resolves too.', values: { liveWork: false, closeTwice: true } },
+    ],
+    call: (v) => [
+      v.liveWork && "await redis.pubsub.subscribe('orders.created', handler)\nawait redis.pubsub.publish('orders.created', { orderId: '42' })\nconst read = redis.streams.read('orders', { id: '$', blockMs: 0 })",
+      'await redis.close()',
+      v.liveWork && "await read\nawait modeClient.publish('showcase:client:events:orders.created', '{\"orderId\":\"43\"}')  // does the handler still hear it?\nawait redis.pubsub.subscribe('orders.created', handler)",
+      v.closeTwice && 'await redis.close()',
+    ].filter(Boolean).join('\n'),
+    body: (v) => ({ liveWork: v.liveWork === true, closeTwice: v.closeTwice === true }),
   },
 
   'session.create': {

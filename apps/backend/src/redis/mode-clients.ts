@@ -11,7 +11,8 @@ export interface ModeClientHooks {
   onError: (mode: Mode, error: unknown, context: RedisErrorContext) => void;
 }
 
-const MODULES = {
+/** Every module enabled, under the same namespaces on every mode. */
+export const MODE_CLIENT_MODULES = {
   cache: { enabled: true, namespace: 'showcase:cache' },
   lock: { enabled: true, namespace: 'showcase:lock' },
   rateLimit: { enabled: true, namespace: 'showcase:rate-limit' },
@@ -47,7 +48,7 @@ export function createModeClients(config: Config, hooks: ModeClientHooks): ModeC
     config.SHOWCASE_MODES.map((mode) => [
       mode,
       createRedisClient(
-        { ...connectionConfig(mode, config), ...MODULES },
+        { ...connectionConfig(mode, config), ...MODE_CLIENT_MODULES },
         { onError: (error, context) => hooks.onError(mode, error, context) },
       ),
     ]),
