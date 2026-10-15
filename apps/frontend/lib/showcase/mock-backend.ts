@@ -70,22 +70,25 @@ export const MODULES: ShowcaseModule[] = [
       { id: 'acquire', label: 'acquire' },
       { id: 'extend', label: 'extend' },
       { id: 'release', label: 'release' },
+      { id: 'using', label: 'using' },
     ] },
   { id: 'rate-limit', label: 'Rate limit', kind: 'feature', blurb: 'Atomic fixed-window counters.',
     ops: [
       { id: 'consume', label: 'consume' },
       { id: 'check', label: 'check' },
       { id: 'reset', label: 'reset' },
+      { id: 'burst', label: 'burst' },
     ] },
   { id: 'pubsub', label: 'Pub/Sub', kind: 'feature', blurb: 'JSON fan-out over a dedicated subscriber.',
     ops: [
-      { id: 'publish', label: 'publish' },
       { id: 'subscribe', label: 'subscribe' },
+      { id: 'publish', label: 'publish' },
     ] },
   { id: 'streams', label: 'Streams', kind: 'feature', blurb: 'Append, consumer groups, reads, acks.',
     ops: [
+      { id: 'createGroup', label: 'createGroup' },
       { id: 'add', label: 'add' },
-      { id: 'read', label: 'group read' },
+      { id: 'read', label: 'read' },
       { id: 'ack', label: 'ack' },
     ] },
   { id: 'failover', label: 'Failover', kind: 'mode-specific', onlyMode: 'sentinel', blurb: 'Move the master 6380 → 6381 and watch.',
@@ -185,32 +188,6 @@ export function runOp(mode: Mode, moduleId: string, opId: string, v: Values, sta
         : ok({ hit: false }, [], [`GET ${ns}:${v.key}`]);
     case 'cache.clear':
       return ok(3, [], mode === 'cluster' ? ['SCAN on 7001', 'SCAN on 7002', 'SCAN on 7003', 'DEL (grouped by slot)'] : [`SCAN 0 MATCH ${ns}:${v.pattern} COUNT 100`, 'DEL …']);
-    case 'lock.acquire': {
-      if (Number(v.ttl) > 300) return fail(413, 'LOCK_LIMIT', 'LockError', `ttl ${v.ttl}s exceeds maxTtl 300s`);
-      const acquired = Math.random() > 0.3;
-      return ok({ acquired, token: 'Zk1…pQ' }, [k(`showcase:lock:${v.name}`, 'string', Number(v.ttl))], [`SET showcase:lock:${v.name} <token> PX ${Number(v.ttl) * 1000} NX`]);
-    }
-    case 'lock.extend':
-    case 'lock.release': {
-      const mine = !String(v.token).includes('not-my');
-      return ok(mine, mine && opId === 'extend' ? [k(`showcase:lock:${v.name}`, 'string', Number(v.ttl))] : [], [`EVALSHA ${opId}.lua 1 showcase:lock:${v.name} …`]);
-    }
-    case 'rate-limit.consume': {
-      const cost = Number(v.cost);
-      if (!Number.isInteger(cost) || cost < 1) return fail(400, 'RATE_LIMIT_INPUT', 'RateLimitError', 'cost must be a positive integer');
-      const count = Math.floor(Math.random() * 90) + cost;
-      return ok({ allowed: count <= 100, limit: 100, remaining: Math.max(0, 100 - count), count, retryAfterSeconds: count > 100 ? 41 : 0 },
-        [k(`showcase:rate-limit:{${v.subject}}`, 'hash', 60)], ['EVALSHA consume.lua 1 …']);
-    }
-    case 'pubsub.publish':
-      return ok(mode === 'cluster' || String(v.channel).includes('cancelled') ? 0 : 1, [], [`PUBLISH showcase:events:${v.channel} ${json(v.message)}`]);
-    case 'streams.add':
-      if (String(v.fields).replace(/\s/g, '') === '{}') return fail(400, 'STREAMS_INPUT', 'StreamsError', 'fields must not be empty');
-      return ok('1760541600000-0', [k(`showcase:stream:${v.stream}`, 'stream', null)], [`XADD showcase:stream:${v.stream} MAXLEN ~ ${v.maxEntries} * …`]);
-    case 'streams.read':
-      if (v.group === 'ghost') return fail(502, 'NOGROUP', 'ReplyError', "NOGROUP No such key 'showcase:stream:orders' or consumer group 'ghost'", ['XREADGROUP …']);
-      return ok([{ id: '1760541600000-0', fields: { orderId: '42', type: 'created' } }], [k(`showcase:stream:${v.stream}`, 'stream', null)],
-        [`XREADGROUP GROUP ${v.group} ${v.consumer} COUNT ${v.count} BLOCK 1000 STREAMS showcase:stream:${v.stream} ${v.pending ? '0' : '>'}`]);
     default:
       return ok({ ok: true, note: 'stubbed' }, [], [`(${moduleId}.${opId})`]);
   }
