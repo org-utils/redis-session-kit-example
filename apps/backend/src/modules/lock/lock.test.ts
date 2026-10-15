@@ -1,9 +1,10 @@
 // Smoke test of the lock feature module per connection mode, against the Docker stacks (`pnpm infra:up`).
 import assert from 'node:assert/strict';
 import { after, before, describe, test } from 'node:test';
-import { MODES, ServerEventSchema, type EventLogEntry, type Mode } from '@showcase/contracts';
+import { MODES } from '@showcase/contracts';
 import { buildApp } from '../../app.ts';
 import { testConfig } from '../../test-config.ts';
+import { eventLogEntries } from '../../test-sse.ts';
 
 const app = await buildApp({ config: testConfig() });
 let base: string;
@@ -11,29 +12,6 @@ before(async () => {
   base = await app.listen({ port: 0, host: '127.0.0.1' });
 });
 after(() => app.close());
-
-/** The first event log entry on `mode` matching `match`, from GET /api/events (which replays the buffer on connect). */
-async function eventLogEntry(mode: Mode, match: (entry: EventLogEntry) => boolean): Promise<EventLogEntry> {
-  const res = await fetch(`${base}/api/events`, { signal: AbortSignal.timeout(5000) });
-  const reader = res.body!.pipeThrough(new TextDecoderStream()).getReader();
-  let buffered = '';
-  try {
-    for (;;) {
-      const { value, done } = await reader.read();
-      if (done) throw new Error('stream ended');
-      buffered += value;
-      const frames = buffered.split('\n\n');
-      buffered = frames.pop()!;
-      for (const frame of frames) {
-        if (!frame.startsWith('data: ')) continue;
-        const event = ServerEventSchema.parse(JSON.parse(frame.slice(6)));
-        if (event.type === 'entry' && event.entry.mode === mode && match(event.entry)) return event.entry;
-      }
-    }
-  } finally {
-    await reader.cancel();
-  }
-}
 
 const NAME = 'report:nightly';
 
@@ -136,8 +114,8 @@ for (const mode of MODES) {
       const done = await using;
       assert.equal(done.status, 200, 'using() still resolves with the callback’s result');
       assert.equal((await lease()).token, b.body.result.token, 'B’s lease survives the release');
-      const entry = await eventLogEntry(mode, (e) => e.source === 'lock-release' && e.ts >= started);
-      assert.equal(entry.kind, 'showcase');
+      const [entry] = await eventLogEntries(base, mode, (e) => e.source === 'lock-release' && e.ts >= started);
+      assert.equal(entry?.kind, 'showcase');
       assert.match(entry.message, /^report:nightly: the lease ran out mid-work/);
     });
 
