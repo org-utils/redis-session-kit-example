@@ -26,6 +26,7 @@ import { runOperation, type RunResult } from '@/lib/showcase/api';
 import { MODE_ICON, MODULES, MODULE_ICON, modeText, runOp } from '@/lib/showcase/mock-backend';
 import { formatLatency, healthDot, healthText, useLive } from '@/lib/showcase/live';
 import { useSessionLab } from '@/lib/showcase/mock-sessions';
+import { perMode } from '@/lib/showcase/per-mode';
 import { RequestForm } from './request-form';
 import { CliSnippet, Commands, HttpBadge, InsightLink, Json, KeysTable, ModeName } from './result-display';
 import { FailoverSection } from './failover-section';
@@ -72,11 +73,11 @@ export function ShowcaseShell({ initialStatus }: { initialStatus: StatusResponse
     setResults(await Promise.all(modes.map((md) => runOperation(md, moduleId, op.id, () => body(values)))));
     setRunning(false);
   };
-  // Bumped by Reset section: the live sections start over, since what they showed was just deleted.
-  const [resets, setResets] = useState(0);
+  // Bumped per mode by Reset section: the live sections start that mode over, since what they showed was just deleted.
+  const [resets, setResets] = useState(() => perMode(() => 0));
   const resetSection = async () => {
     setRunning(true);
-    setResets((n) => n + 1);
+    setResets((r) => ({ ...r, [mode]: r[mode] + 1 }));
     setResults([await runOperation(mode, moduleId, 'reset-section', () => ({}))]);
     setRunning(false);
   };
@@ -197,7 +198,7 @@ export function ShowcaseShell({ initialStatus }: { initialStatus: StatusResponse
               ) : moduleId === 'lock' ? (
                 <LockSection mode={mode} onResult={(r) => setResults([r])} />
               ) : moduleId === 'rate-limit' ? (
-                <RateLimitSection key={resets} mode={mode} onResult={(r) => setResults([r])} />
+                <RateLimitSection mode={mode} resets={resets} onResult={(r) => setResults([r])} />
               ) : moduleId === 'pubsub' ? (
                 <PubSubSection mode={mode} />
               ) : moduleId === 'streams' ? (

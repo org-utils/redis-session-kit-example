@@ -10,7 +10,7 @@ import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle }
 import { cn } from '@/lib/utils';
 import { runOperation, type RunResult } from '@/lib/showcase/api';
 import { spec, type Values } from '@/lib/showcase/examples';
-import { perMode } from '@/lib/showcase/per-mode';
+import { perMode, useOnReset } from '@/lib/showcase/per-mode';
 import { useNow } from '@/lib/showcase/use-now';
 import { RateLimitResultSchema, type Mode, type RateLimitResult } from '@showcase/contracts';
 import { OpForm } from './op-form';
@@ -19,12 +19,17 @@ const BURST_GAP_MS = 100;
 const MARKERS_KEPT = 60;
 
 interface Marker { id: number; op: string; cost: number; result?: RateLimitResult; error?: string }
-interface Pane { subject: string; window: RateLimitResult | null; markers: Marker[] }
+/** `current`: the subject's window as the last consume or check reported it. */
+interface Pane { subject: string; current: RateLimitResult | null; markers: Marker[] }
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
-export function RateLimitSection({ mode, onResult }: { mode: Mode; onResult: (r: RunResult) => void }) {
-  const [panes, setPanes] = useState(() => perMode<Pane>(() => ({ subject: 'user:42', window: null, markers: [] })));
+const emptyPane = (): Pane => ({ subject: 'user:42', current: null, markers: [] });
+
+export function RateLimitSection({ mode, resets, onResult }: { mode: Mode; resets: Record<Mode, number>; onResult: (r: RunResult) => void }) {
+  const [panes, setPanes] = useState(() => perMode(emptyPane));
+  // Reset section deleted this mode's windows: start its pane over.
+  useOnReset(resets, (m) => setPanes((p) => ({ ...p, [m]: emptyPane() })));
   const now = useNow();
   const pane = panes[mode];
 
@@ -38,8 +43,8 @@ export function RateLimitSection({ mode, onResult }: { mode: Mode; onResult: (r:
     setPanes((p) => {
       const prev = p[at];
       // A reset deletes the window; an error leaves it as it was.
-      const window = parsed.success ? parsed.data : op === 'reset' && r.httpStatus === 200 ? null : prev.subject === subject ? prev.window : null;
-      return { ...p, [at]: { subject, window, markers: [marker, ...prev.markers].slice(0, MARKERS_KEPT) } };
+      const current = parsed.success ? parsed.data : op === 'reset' && r.httpStatus === 200 ? null : prev.subject === subject ? prev.current : null;
+      return { ...p, [at]: { subject, current, markers: [marker, ...prev.markers].slice(0, MARKERS_KEPT) } };
     });
     return r;
   };
@@ -64,11 +69,11 @@ export function RateLimitSection({ mode, onResult }: { mode: Mode; onResult: (r:
     };
   };
 
-  const { window, markers } = pane;
-  const left = window ? window.resetAt * 1000 - now : 0;
-  const over = !!window && left <= 0;
-  const limit = window?.limit ?? 10;
-  const count = window?.count ?? 0;
+  const { current, markers } = pane;
+  const left = current ? current.resetAt * 1000 - now : 0;
+  const over = !!current && left <= 0;
+  const limit = current?.limit ?? 10;
+  const count = current?.count ?? 0;
   return (
     <div className="grid grid-cols-1 gap-4 @5xl:grid-cols-[minmax(0,1fr)_26rem]">
       <OpForm module="rate-limit" ops={['consume', 'check', 'reset', 'burst']} mode={mode} onRun={run} onResult={onResult} />
@@ -77,7 +82,7 @@ export function RateLimitSection({ mode, onResult }: { mode: Mode; onResult: (r:
           <CardTitle className="flex items-center gap-2 text-sm"><Gauge className="size-4" /> showcase:rate-limit:{`{${pane.subject}}`}</CardTitle>
           <CardDescription>The mode clients allow 10 requests per 20 s window. Windows are aligned to the clock, so the first one may be short.</CardDescription>
           <CardAction>
-            <Badge variant="outline" className="font-mono"><Timer /> {!window ? 'no window' : over ? 'window over' : `resets in ${(left / 1000).toFixed(1)}s`}</Badge>
+            <Badge variant="outline" className="font-mono"><Timer /> {!current ? 'no window' : over ? 'window over' : `resets in ${(left / 1000).toFixed(1)}s`}</Badge>
           </CardAction>
         </CardHeader>
         <CardContent className="space-y-3">
@@ -85,7 +90,7 @@ export function RateLimitSection({ mode, onResult }: { mode: Mode; onResult: (r:
             {Array.from({ length: limit }, (_, i) => <div key={i} className={cn('h-6 flex-1 rounded-sm', i < count ? (count >= limit ? 'bg-destructive' : 'bg-mode-standalone') : 'bg-muted')} />)}
           </div>
           <div className="font-mono text-xs text-muted-foreground">
-            {window ? <>count {count} / {limit} · remaining {window.remaining}{over && ' · the next call starts a new window'}</> : 'Run consume or check to read the window.'}
+            {current ? <>count {count} / {limit} · remaining {current.remaining}{over && ' · the next call starts a new window'}</> : 'Run consume or check to read the window.'}
           </div>
           <div className="flex flex-wrap gap-1">
             {markers.slice(0, 30).reverse().map((m) => {

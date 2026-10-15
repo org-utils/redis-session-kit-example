@@ -393,7 +393,6 @@ export const OPS: Record<string, OpSpec> = {
       { id: 'ten', title: 'Exactly ten', description: 'Fills the window to the limit: then try check’s “At exactly the limit”.', values: { subject: 'user:42', n: 10 } },
     ],
     call: (v) => `for (let i = 0; i < ${v.n}; i++) await redis.rateLimiter.consume(${q(v.subject)})   // sent by the showcase, ~100 ms apart`,
-    body: (v) => ({ subject: v.subject }),
   },
   'pubsub.subscribe': {
     fields: [{ name: 'channel', label: 'channel', kind: 'text' }],
