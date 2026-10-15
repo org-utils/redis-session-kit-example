@@ -5,3 +5,4 @@ next-env.d.ts
 apps/frontend/AGENTS.md
 apps/frontend/CLAUDE.md
 *.tsbuildinfo
+.claude/worktrees/
