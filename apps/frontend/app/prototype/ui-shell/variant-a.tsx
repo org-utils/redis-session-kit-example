@@ -10,7 +10,6 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
-import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Separator } from '@/components/ui/separator';
@@ -21,29 +20,40 @@ import {
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { cn } from '@/lib/utils';
 import { CliSnippet, Commands, HttpBadge, InsightLink, Json, KeysTable, ModeName } from './bits';
+import { spec, type Values } from './examples';
+import { ExamplePicker, RequestForm } from './request-form';
 import { MODES, MODE_ICON, MODULES, MODULE_ICON, healthDot, healthText, modeText, runOp, useStubLive, type Mode, type RunResult } from './stub';
 
 export const name = 'Sidebar, one mode at a time';
 
 export function VariantA() {
   // PROTOTYPE: ?sidebar=closed starts collapsed, for screenshots of icon mode.
-  const startOpen = useSearchParams().get('sidebar') !== 'closed';
+  const params = useSearchParams();
+  const startOpen = params.get('sidebar') !== 'closed';
   const { status, events, simulateFailover } = useStubLive();
   const [mode, setMode] = useState<Mode>('standalone');
-  const [moduleId, setModuleId] = useState('cache');
+  const [moduleId, setModuleId] = useState(MODULES.some((m) => m.id === params.get('module')) ? params.get('module')! : 'cache');
   const mod = MODULES.find((m) => m.id === moduleId)!;
   const [opId, setOpId] = useState(mod.ops[0].id);
   const op = mod.ops.find((o) => o.id === opId) ?? mod.ops[0];
-  const [input, setInput] = useState(op.input);
+  const opSpec = spec(moduleId, op.id);
+  const [exampleId, setExampleId] = useState<string | null>(opSpec.examples[0].id);
+  const [values, setValues] = useState<Values>(opSpec.examples[0].values);
+  const example = opSpec.examples.find((e) => e.id === exampleId);
+  const modified = !example || JSON.stringify(values) !== JSON.stringify(example.values);
+  const loadOp = (mId: string, oId: string) => {
+    const first = spec(mId, oId).examples[0];
+    setOpId(oId); setExampleId(first.id); setValues(first.values); setResults([]);
+  };
   const [compare, setCompare] = useState(false);
   const [results, setResults] = useState<RunResult[]>([]);
 
   const pickModule = (id: string) => {
     const m = MODULES.find((x) => x.id === id)!;
-    setModuleId(id); setOpId(m.ops[0].id); setInput(m.ops[0].input); setResults([]);
+    setModuleId(id); loadOp(id, m.ops[0].id);
     if (m.onlyMode) { setMode(m.onlyMode); setCompare(false); }
   };
-  const run = () => setResults((compare ? MODES : [mode]).map((md) => runOp(md, moduleId, op.id, input, status[md])));
+  const run = () => setResults((compare ? MODES : [mode]).map((md) => runOp(md, moduleId, op.id, values, status[md])));
   const focus = results.find((r) => r.mode === mode) ?? results[0];
   const s = status[focus?.mode ?? mode];
 
@@ -142,22 +152,26 @@ export function VariantA() {
                 <h1 className="text-2xl font-semibold tracking-tight">{mod.label}</h1>
                 <p className="text-sm text-muted-foreground">{mod.blurb}</p>
               </div>
-              <Tabs value={op.id} onValueChange={(v) => { setOpId(v); setInput(mod.ops.find((o) => o.id === v)!.input); }}>
+              <Tabs value={op.id} onValueChange={(v) => loadOp(moduleId, v)}>
                 <TabsList variant="line">
                   {mod.ops.map((o) => <TabsTrigger key={o.id} value={o.id} className="font-mono">{o.label}</TabsTrigger>)}
                 </TabsList>
               </Tabs>
-              <div className="flex flex-wrap items-center gap-3">
-                {op.placeholder && <Input value={input} onChange={(e) => setInput(e.target.value)} placeholder={op.placeholder} className="w-72 font-mono" />}
-                <Button onClick={run}><Play /> Run</Button>
-                {!mod.onlyMode && (
-                  <div className="flex items-center gap-2">
-                    <Checkbox id="compare" checked={compare} onCheckedChange={(v) => setCompare(v === true)} />
-                    <Label htmlFor="compare" className="text-muted-foreground">Compare across all modes</Label>
-                  </div>
-                )}
-                {mod.id === 'failover' && <Button variant="outline" onClick={simulateFailover}>Simulate failover in status</Button>}
-              </div>
+              <ExamplePicker examples={opSpec.examples} selected={modified ? null : exampleId}
+                onPick={(ex) => { setExampleId(ex.id); setValues(ex.values); }} />
+              <RequestForm spec={opSpec} values={values} modified={modified} onChange={setValues}
+                onReset={() => example && setValues(example.values)}
+                footer={<>
+                  <Button onClick={run}><Play /> Run{compare ? ' on all modes' : ` on ${mode}`}</Button>
+                  {!mod.onlyMode && (
+                    <div className="flex items-center gap-2">
+                      <Checkbox id="compare" checked={compare} onCheckedChange={(v) => setCompare(v === true)} />
+                      <Label htmlFor="compare" className="text-muted-foreground">Compare across all modes</Label>
+                    </div>
+                  )}
+                  {mod.id === 'failover' && <Button variant="outline" onClick={simulateFailover}>Simulate failover in status</Button>}
+                  {modified && example && <span className="ml-auto text-xs text-muted-foreground">based on “{example.title}”</span>}
+                </>} />
               <div className={cn('grid gap-4', results.length > 1 ? 'grid-cols-3' : 'grid-cols-1')}>
                 {results.map((r) => (
                   <Card key={r.id} size="sm" onClick={() => setMode(r.mode)} className={cn('cursor-pointer', r.mode === focus?.mode && 'ring-2 ring-ring')}>

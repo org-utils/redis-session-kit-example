@@ -2,6 +2,7 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
+import type { Values } from './examples';
 import {
   ArrowLeftRight, Eye, Gauge, Grid3x3, KeyRound, Layers, Lock, Network, Plug, Radio, Server, Waves, type LucideIcon,
 } from 'lucide-react';
@@ -43,7 +44,7 @@ export const INITIAL_STATUS: Record<Mode, ModeStatus> = {
 };
 
 export type ModuleKind = 'feature' | 'mode-specific';
-export interface Op { id: string; label: string; input: string; placeholder: string }
+export interface Op { id: string; label: string }
 export interface ShowcaseModule {
   id: string; label: string; kind: ModuleKind; onlyMode?: Mode; blurb: string; ops: Op[];
 }
@@ -51,49 +52,49 @@ export interface ShowcaseModule {
 export const MODULES: ShowcaseModule[] = [
   { id: 'client', label: 'Client', kind: 'feature', blurb: 'Config validation, namespaces, raw commands, health, shutdown.',
     ops: [
-      { id: 'health', label: 'health()', input: '', placeholder: '' },
-      { id: 'collide', label: 'namespace collision', input: 'app, app:cache', placeholder: 'two namespaces' },
-      { id: 'mget', label: 'raw mget', input: 'a, b, c', placeholder: 'keys' },
+      { id: 'health', label: 'health()' },
+      { id: 'collide', label: 'namespace collision' },
+      { id: 'mget', label: 'raw mget' },
     ] },
   { id: 'session', label: 'Session', kind: 'feature', blurb: 'Opaque credentials, rotation chains, replay, revoke.',
     ops: [
-      { id: 'create', label: 'create', input: 'user-42', placeholder: 'userId' },
-      { id: 'rotate', label: 'rotate', input: '', placeholder: 'token' },
-      { id: 'revokeAll', label: 'revokeAll', input: 'user-42', placeholder: 'userId' },
+      { id: 'create', label: 'create' },
+      { id: 'rotate', label: 'rotate' },
+      { id: 'revokeAll', label: 'revokeAll' },
     ] },
   { id: 'cache', label: 'Cache', kind: 'feature', blurb: 'JSON values with TTL and conditional writes.',
     ops: [
-      { id: 'set', label: 'set', input: 'user:42', placeholder: 'key' },
-      { id: 'get', label: 'get', input: 'user:42', placeholder: 'key' },
-      { id: 'clear', label: 'clear', input: '*', placeholder: 'pattern' },
+      { id: 'set', label: 'set' },
+      { id: 'get', label: 'get' },
+      { id: 'clear', label: 'clear' },
     ] },
   { id: 'lock', label: 'Lock', kind: 'feature', blurb: 'Ownership-token leases.',
     ops: [
-      { id: 'acquire', label: 'acquire', input: 'job:42', placeholder: 'name' },
-      { id: 'extend', label: 'extend', input: 'job:42', placeholder: 'name' },
-      { id: 'release', label: 'release', input: 'job:42', placeholder: 'name' },
+      { id: 'acquire', label: 'acquire' },
+      { id: 'extend', label: 'extend' },
+      { id: 'release', label: 'release' },
     ] },
   { id: 'rate-limit', label: 'Rate limit', kind: 'feature', blurb: 'Atomic fixed-window counters.',
     ops: [
-      { id: 'consume', label: 'consume', input: 'user:42', placeholder: 'subject' },
-      { id: 'check', label: 'check', input: 'user:42', placeholder: 'subject' },
-      { id: 'reset', label: 'reset', input: 'user:42', placeholder: 'subject' },
+      { id: 'consume', label: 'consume' },
+      { id: 'check', label: 'check' },
+      { id: 'reset', label: 'reset' },
     ] },
   { id: 'pubsub', label: 'Pub/Sub', kind: 'feature', blurb: 'JSON fan-out over a dedicated subscriber.',
     ops: [
-      { id: 'publish', label: 'publish', input: 'orders.created', placeholder: 'channel' },
-      { id: 'subscribe', label: 'subscribe', input: 'orders.created', placeholder: 'channel' },
+      { id: 'publish', label: 'publish' },
+      { id: 'subscribe', label: 'subscribe' },
     ] },
   { id: 'streams', label: 'Streams', kind: 'feature', blurb: 'Append, consumer groups, reads, acks.',
     ops: [
-      { id: 'add', label: 'add', input: 'orders', placeholder: 'stream' },
-      { id: 'read', label: 'group read', input: 'orders', placeholder: 'stream' },
-      { id: 'ack', label: 'ack', input: 'orders', placeholder: 'stream' },
+      { id: 'add', label: 'add' },
+      { id: 'read', label: 'group read' },
+      { id: 'ack', label: 'ack' },
     ] },
   { id: 'failover', label: 'Failover', kind: 'mode-specific', onlyMode: 'sentinel', blurb: 'Move the master 6380 → 6381 and watch.',
-    ops: [{ id: 'failover', label: 'SENTINEL FAILOVER', input: 'mymaster', placeholder: 'master name' }] },
+    ops: [{ id: 'failover', label: 'SENTINEL FAILOVER' }] },
   { id: 'slots', label: 'Slots', kind: 'mode-specific', onlyMode: 'cluster', blurb: 'Key → hash slot → node, hash tags, fan-out.',
-    ops: [{ id: 'keyslot', label: 'key → slot', input: '{user:42}:profile', placeholder: 'key' }] },
+    ops: [{ id: 'keyslot', label: 'key → slot' }] },
 ];
 
 // Real CRC16/XMODEM so the cluster stub shows believable slots.
@@ -124,62 +125,107 @@ export interface RunResult {
 }
 
 let runId = 0;
-export function runOp(mode: Mode, moduleId: string, opId: string, input: string, status: ModeStatus): RunResult {
+const err = (code: string, name: string, message: string, mode: Mode) => ({ error: { code, name, message, mode } });
+
+export function runOp(mode: Mode, moduleId: string, opId: string, v: Values, status: ModeStatus): RunResult {
   const ns = `showcase:${moduleId === 'pubsub' ? 'events' : moduleId === 'streams' ? 'stream' : moduleId}`;
+  const input = Object.values(v).map(String).join(' · ');
   const base = { id: ++runId, at: new Date().toLocaleTimeString(), mode, module: moduleId, op: opId, input,
     latencyMs: +(status.latencyMs * (1 + Math.random())).toFixed(2) };
   const k = (key: string, type: string, ttl: number | null): KeyTouched =>
     mode === 'cluster' ? { key, type, ttl, slot: slotOf(key), node: nodeOf(slotOf(key)) } : { key, type, ttl };
+  const ok = (body: unknown, keys: KeyTouched[], commands: string[], httpStatus = 200): RunResult => ({ ...base, httpStatus, body, keys, commands });
+  const fail = (httpStatus: number, code: string, name: string, message: string, commands: string[] = []): RunResult =>
+    ({ ...base, httpStatus, body: err(code, name, message, mode), keys: [], commands });
 
-  if (status.health === 'unhealthy')
-    return { ...base, httpStatus: 503, body: { error: { code: 'MODE_UNAVAILABLE', name: 'ModeUnavailable', message: `${mode} has been unhealthy for 3 checks`, mode } }, keys: [], commands: [] };
+  if (status.health === 'unhealthy') return fail(503, 'MODE_UNAVAILABLE', 'ModeUnavailable', `${mode} has been unhealthy for 3 checks`);
 
   switch (`${moduleId}.${opId}`) {
-    case 'client.mget':
-      if (mode === 'cluster')
-        return { ...base, httpStatus: 502, body: { error: { code: 'CROSSSLOT', name: 'ReplyError', message: "CROSSSLOT Keys in request don't hash to the same slot", mode } }, keys: [], commands: ['MGET a b c'] };
-      return { ...base, httpStatus: 200, body: [null, null, null], keys: [], commands: ['MGET a b c'] };
-    case 'client.health':
-      return { ...base, httpStatus: 200, body: mode === 'cluster'
-        ? { status: status.health, latencyMs: 1.4, nodes: status.detail.slice(1).map((d) => ({ address: `127.0.0.1:${d.slice(0, 4)}`, status: 'healthy', latencyMs: 1.1 })) }
-        : { status: status.health, latencyMs: status.latencyMs }, keys: [], commands: ['PING'] };
-    case 'client.collide':
-      return { ...base, httpStatus: 500, body: { error: { code: 'REDIS_CONFIGURATION', name: 'RedisConfigurationError', message: 'Namespaces "app" (sessions) and "app:cache" (cache) overlap', mode } }, keys: [], commands: [] };
-    case 'session.create': {
-      const u = 'a3f9…c21e';
-      return { ...base, httpStatus: 200, body: { token: 'kq3J…x9Q', session: { userId: input, jti: 'j_7f2a', version: 1, status: 'active' }, setCookie: `showcase_session_${mode}=kq3J…x9Q; Path=/; HttpOnly; SameSite=Lax` },
-        keys: [k(`showcase:session:session:{${u}}:9be1…`, 'string', 2592000), k(`showcase:session:user-sessions:{${u}}`, 'zset', 2592000), k(`showcase:session:token-index:9be1…`, 'string', 2592000)],
-        commands: ['EVALSHA create.lua 3 …'] };
+    case 'client.health': {
+      const latency = status.latencyMs;
+      const st = latency > Number(v.degradedMs) ? 'degraded' : status.health;
+      return ok(mode === 'cluster'
+        ? { status: st, latencyMs: 1.4, nodes: ['7001', '7002', '7003'].map((p) => ({ address: `127.0.0.1:${p}`, status: 'healthy', latencyMs: 1.1 })) }
+        : { status: st, latencyMs: latency }, [], mode === 'cluster' ? ['PING → 7001', 'PING → 7002', 'PING → 7003'] : ['PING']);
     }
-    case 'cache.set':
-      return { ...base, httpStatus: 200, body: true, keys: [k(`${ns}:${input}`, 'string', 300)], commands: [`SET ${ns}:${input} {"id":"42"} EX 300`] };
+    case 'client.collide': {
+      const a = String(v.cache), c = String(v.sessions);
+      const collide = a === c || a.startsWith(`${c}:`) || c.startsWith(`${a}:`);
+      return collide
+        ? fail(500, 'REDIS_CONFIGURATION', 'RedisConfigurationError', `Namespaces "${c}" (sessions) and "${a}" (cache) overlap`)
+        : ok({ created: true, config: { cache: { namespace: a }, sessions: { namespace: c } } }, [], []);
+    }
+    case 'client.mget': {
+      const keys = String(v.keys).split(',').map((x) => x.trim()).filter(Boolean);
+      const sameSlot = new Set(keys.map(slotOf)).size <= 1;
+      if (mode === 'cluster' && !sameSlot) return fail(502, 'CROSSSLOT', 'ReplyError', "CROSSSLOT Keys in request don't hash to the same slot", [`MGET ${keys.join(' ')}`]);
+      return ok(keys.map(() => null), keys.map((x) => k(x, 'none', null)), [`MGET ${keys.join(' ')}`]);
+    }
+    case 'session.create': {
+      if (String(v.metadata).length > 200) return fail(413, 'SESSION_LIMIT', 'SessionLimitError', 'metadata exceeds maxMetadataBytes (8192)');
+      const u = 'a3f9…c21e';
+      return ok({ token: 'kq3J…x9Q', session: { userId: v.userId, deviceId: v.deviceId, jti: 'j_7f2a', version: 1, status: 'active' },
+        setCookie: `showcase_session_${mode}=kq3J…x9Q; Path=/; HttpOnly; SameSite=Lax` },
+        [k(`showcase:session:session:{${u}}:9be1…`, 'string', 2592000), k(`showcase:session:user-sessions:{${u}}`, 'zset', 2592000), k('showcase:session:token-index:9be1…', 'string', 2592000)],
+        ['EVALSHA create.lua 3 …']);
+    }
+    case 'session.rotate':
+      if (String(v.token).includes('previous')) return fail(409, 'SESSION_REPLAY', 'SessionReplayError', 'credential belongs to a consumed session', ['EVALSHA rotate.lua …']);
+      return ok({ token: 'Pz8w…3Lk', previousJti: 'j_7f2a', session: { jti: 'j_91bc', status: 'active' } }, [], ['EVALSHA rotate.lua …']);
+    case 'session.revokeAll': {
+      const lim = Number(v.limit);
+      return ok({ affected: Math.min(lim, 2), remaining: Math.max(0, 2 - lim) }, [], ['ZRANGE …', 'EVALSHA revoke.lua …']);
+    }
+    case 'cache.set': {
+      const exists = String(v.key) === 'user:42';
+      const written = v.condition === 'nx' ? !exists : v.condition === 'xx' ? exists : true;
+      return ok(written, written ? [k(`${ns}:${v.key}`, 'string', Number(v.ttl))] : [],
+        [`SET ${ns}:${v.key} ${json(v.value)} EX ${v.ttl}${v.condition !== 'none' ? ` ${String(v.condition).toUpperCase()}` : ''}`]);
+    }
     case 'cache.get':
-      return { ...base, httpStatus: 200, body: { hit: true, value: { id: '42' } }, keys: [k(`${ns}:${input}`, 'string', 287)], commands: [`GET ${ns}:${input}`] };
+      return String(v.key) === 'user:42'
+        ? ok({ hit: true, value: { id: '42', name: 'Ada' } }, [k(`${ns}:${v.key}`, 'string', 287)], [`GET ${ns}:${v.key}`])
+        : ok({ hit: false }, [], [`GET ${ns}:${v.key}`]);
     case 'cache.clear':
-      return { ...base, httpStatus: 200, body: 3, keys: [], commands: mode === 'cluster' ? ['SCAN on 7001', 'SCAN on 7002', 'SCAN on 7003', 'DEL (grouped by slot)'] : [`SCAN 0 MATCH ${ns}:* COUNT 100`, 'DEL …'] };
+      return ok(3, [], mode === 'cluster' ? ['SCAN on 7001', 'SCAN on 7002', 'SCAN on 7003', 'DEL (grouped by slot)'] : [`SCAN 0 MATCH ${ns}:${v.pattern} COUNT 100`, 'DEL …']);
     case 'lock.acquire': {
+      if (Number(v.ttl) > 300) return fail(413, 'LOCK_LIMIT', 'LockError', `ttl ${v.ttl}s exceeds maxTtl 300s`);
       const acquired = Math.random() > 0.3;
-      return { ...base, httpStatus: 200, body: { acquired, token: 'Zk1…pQ' }, keys: [k(`showcase:lock:${input}`, 'string', acquired ? 30 : 12)], commands: [`SET showcase:lock:${input} <token> PX 30000 NX`] };
+      return ok({ acquired, token: 'Zk1…pQ' }, [k(`showcase:lock:${v.name}`, 'string', Number(v.ttl))], [`SET showcase:lock:${v.name} <token> PX ${Number(v.ttl) * 1000} NX`]);
+    }
+    case 'lock.extend':
+    case 'lock.release': {
+      const mine = !String(v.token).includes('not-my');
+      return ok(mine, mine && opId === 'extend' ? [k(`showcase:lock:${v.name}`, 'string', Number(v.ttl))] : [], [`EVALSHA ${opId}.lua 1 showcase:lock:${v.name} …`]);
     }
     case 'rate-limit.consume': {
-      const count = Math.floor(Math.random() * 110);
-      return { ...base, httpStatus: 200, body: { allowed: count <= 100, limit: 100, remaining: Math.max(0, 100 - count), count, retryAfterSeconds: count > 100 ? 41 : 0 },
-        keys: [k(`showcase:rate-limit:{${input}}`, 'hash', 60)], commands: ['EVALSHA consume.lua 1 …'] };
+      const cost = Number(v.cost);
+      if (!Number.isInteger(cost) || cost < 1) return fail(400, 'RATE_LIMIT_INPUT', 'RateLimitError', 'cost must be a positive integer');
+      const count = Math.floor(Math.random() * 90) + cost;
+      return ok({ allowed: count <= 100, limit: 100, remaining: Math.max(0, 100 - count), count, retryAfterSeconds: count > 100 ? 41 : 0 },
+        [k(`showcase:rate-limit:{${v.subject}}`, 'hash', 60)], ['EVALSHA consume.lua 1 …']);
     }
     case 'pubsub.publish':
-      return { ...base, httpStatus: 200, body: mode === 'cluster' ? 0 : 1, keys: [], commands: [`PUBLISH showcase:events:${input} {…}`] };
+      return ok(mode === 'cluster' || String(v.channel).includes('cancelled') ? 0 : 1, [], [`PUBLISH showcase:events:${v.channel} ${json(v.message)}`]);
     case 'streams.add':
-      return { ...base, httpStatus: 200, body: '1760541600000-0', keys: [k(`showcase:stream:${input}`, 'stream', null)], commands: [`XADD showcase:stream:${input} MAXLEN ~ 100000 * …`] };
+      if (String(v.fields).replace(/\s/g, '') === '{}') return fail(400, 'STREAMS_INPUT', 'StreamsError', 'fields must not be empty');
+      return ok('1760541600000-0', [k(`showcase:stream:${v.stream}`, 'stream', null)], [`XADD showcase:stream:${v.stream} MAXLEN ~ ${v.maxEntries} * …`]);
+    case 'streams.read':
+      if (v.group === 'ghost') return fail(502, 'NOGROUP', 'ReplyError', "NOGROUP No such key 'showcase:stream:orders' or consumer group 'ghost'", ['XREADGROUP …']);
+      return ok([{ id: '1760541600000-0', fields: { orderId: '42', type: 'created' } }], [k(`showcase:stream:${v.stream}`, 'stream', null)],
+        [`XREADGROUP GROUP ${v.group} ${v.consumer} COUNT ${v.count} BLOCK 1000 STREAMS showcase:stream:${v.stream} ${v.pending ? '0' : '>'}`]);
     case 'failover.failover':
-      return { ...base, httpStatus: 202, body: { accepted: true, from: '127.0.0.1:6380', to: '127.0.0.1:6381' }, keys: [], commands: ['SENTINEL FAILOVER mymaster'] };
+      return ok({ accepted: true, from: '127.0.0.1:6380', to: '127.0.0.1:6381' }, [], [`SENTINEL FAILOVER ${v.master}`], 202);
     case 'slots.keyslot': {
-      const slot = slotOf(input);
-      return { ...base, httpStatus: 200, body: { key: input, hashTag: input.match(/\{(.+?)\}/)?.[1] ?? null, slot, node: nodeOf(slot) }, keys: [], commands: [`CLUSTER KEYSLOT ${input}`] };
+      const key = String(v.key), slot = slotOf(key);
+      return ok({ key, hashTag: key.match(/\{(.+?)\}/)?.[1] ?? null, slot, node: nodeOf(slot) }, [], [`CLUSTER KEYSLOT ${key}`]);
     }
     default:
-      return { ...base, httpStatus: 200, body: { ok: true, note: 'stubbed' }, keys: [], commands: [`(${moduleId}.${opId})`] };
+      return ok({ ok: true, note: 'stubbed' }, [], [`(${moduleId}.${opId})`]);
   }
 }
+
+function json(s: unknown) { try { return JSON.stringify(JSON.parse(String(s))); } catch { return String(s); } }
 
 export interface ShowcaseEvent { id: number; ts: number; at: string; mode: Mode; kind: 'health' | 'error'; text: string }
 
