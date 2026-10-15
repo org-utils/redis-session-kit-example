@@ -1,2 +1,5 @@
 packages:
   - apps/*
+minimumReleaseAgeExclude:
+  - ioredis-toolkit@1.0.11
+  - ioredis-toolkit@1.1.2
