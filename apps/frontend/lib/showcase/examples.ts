@@ -36,7 +36,10 @@ const lane: Field = { name: 'lane', label: 'holder', kind: 'select', options: ['
 const lockName: Field = { name: 'name', label: 'name', kind: 'text' };
 const stream: Field = { name: 'stream', label: 'stream', kind: 'text' };
 const subject: Field = { name: 'subject', label: 'subject', kind: 'text' };
-/** A credential: `$cookie` sends none, so the backend presents this mode's cookie, as a real request would. */
+/**
+ * A credential: `$cookie` sends none, so the backend presents this mode's cookie, as a real request would. `$previous`
+ * (the token before the last rotation) is swapped for the token itself by the session section before this runs.
+ */
 const sessionToken: Field = { name: 'token', label: 'token', kind: 'token' };
 const sessionTokenBody = (v: Values) => ({ token: v.token === '$cookie' ? undefined : String(v.token) });
 const lockTtl: Field = { name: 'ttl', label: 'ttl (seconds)', kind: 'number', help: 'blank: the default lease, 30 s (maxTtl 300)' };
@@ -172,6 +175,7 @@ export const OPS: Record<string, OpSpec> = {
       { id: 'phone', title: 'Same user on a phone', description: 'A second session in the user\'s session set; the cookie now holds this one.', values: { userId: 'user-42', deviceId: 'phone', securityVersion: 1, metadata: '{}', ttl: '', idleTimeout: '', absoluteTimeout: '' } },
       { id: 'idle', title: 'Watch an idle timeout', description: 'idleTimeout 20 s: leave it alone and validate answers idle_timeout.', values: { userId: 'user-42', deviceId: 'kiosk', securityVersion: 1, metadata: '{}', ttl: '', idleTimeout: 20, absoluteTimeout: '' } },
       { id: 'absolute', title: 'Watch an absolute timeout', description: 'Idle 20 s, absolute 45 s (and ttl 45: it may not exceed absoluteTimeout). Touching keeps it past 20 s, but at 45 s Redis expires the record: not_found.', values: { userId: 'user-42', deviceId: 'kiosk', securityVersion: 1, metadata: '{}', ttl: 45, idleTimeout: 20, absoluteTimeout: 45 } },
+      { id: 'after-reset', title: 'Log in after a password reset', description: 'securityVersion 2: valid once setSecurityVersion has bumped the user to 2, while the sessions created with 1 stay invalid.', values: { userId: 'user-42', deviceId: 'laptop', securityVersion: 2, metadata: '{ "plan": "pro" }', ttl: '', idleTimeout: '', absoluteTimeout: '' } },
       { id: 'too-long', title: 'Absolute timeout under the ttl', description: 'absoluteTimeout 45 s with the configured ttl of 3600 s: SESSION_INVALID.', values: { userId: 'user-42', deviceId: 'kiosk', securityVersion: 1, metadata: '{}', ttl: '', idleTimeout: '', absoluteTimeout: 45 } },
     ],
     call: (v) => `await redis.sessions.create({ userId: ${q(v.userId)}, deviceId: ${q(v.deviceId)}, securityVersion: ${v.securityVersion}, metadata: ${json(v.metadata)}${['ttl', 'idleTimeout', 'absoluteTimeout'].filter((f) => v[f] !== '').map((f) => `, ${f}: ${v[f]}`).join('')}, ipAddress, userAgent })`,
@@ -219,46 +223,59 @@ export const OPS: Record<string, OpSpec> = {
     body: (v) => ({ ...sessionTokenBody(v), metadata: parse(v.metadata, 'metadata'), expectedVersion: optional(v.expectedVersion) }),
   },
   'session.rotate': {
-    fields: [{ name: 'token', label: 'token', kind: 'token' }],
+    fields: [sessionToken],
     examples: [
-      { id: 'current', title: 'Rotate after privilege change', description: 'Consumes the session and creates its successor; the cookie moves on.', values: { token: '$cookie' } },
-      { id: 'replay', title: 'Replay the old token', description: 'Rotating the consumed predecessor: SessionReplayError. Nothing else ends.', values: { token: '$previous' } },
+      { id: 'current', title: 'Rotate after privilege change', description: 'Consumes the session and creates its successor (rotatedFrom links back); the cookie moves on to the successor, which joins the token wallet. Rotating a wallet entry instead leaves the cookie alone.', values: { token: '$cookie' } },
+      { id: 'replay', title: 'Replay the old token', description: 'Rotating the consumed predecessor: SessionReplayError (401). Replay alone ends no session: the successor stays active.', values: { token: '$previous' } },
     ],
     call: (v) => `await redis.sessions.rotate(${tok(v.token)})`,
+    body: sessionTokenBody,
   },
   'session.revoke': {
-    fields: [{ name: 'token', label: 'token', kind: 'token' }],
+    fields: [sessionToken],
     examples: [
-      { id: 'logout', title: 'Log out', description: 'Revokes the session; it answers revoked until its tombstone expires (≤ 300 s).', values: { token: '$cookie' } },
-      { id: 'stale', title: 'Log out with a stale cookie', description: 'Revoking a consumed token follows the rotation chain and revokes its end.', values: { token: '$previous' } },
+      { id: 'logout', title: 'Log out', description: 'Revokes the session and clears the cookie; the record stays as a revoked tombstone (≤ 300 s) and answers revoked until it expires.', values: { token: '$cookie' } },
+      { id: 'stale', title: 'Log out from a stale tab', description: 'A tab still holding the token from before the rotation logs out with it: revoke follows the rotation chain and revokes its end, the session in this browser\'s cookie (validate it: revoked). The stale token stays consumed, so replay is still reported.', values: { token: '$previous' } },
     ],
     call: (v) => `await redis.sessions.revoke(${tok(v.token)})`,
+    body: sessionTokenBody,
   },
   'session.destroy': {
-    fields: [{ name: 'token', label: 'token', kind: 'token' }],
-    examples: [{ id: 'destroy', title: 'Delete outright', description: 'No tombstone: the credential answers not_found right away.', values: { token: '$cookie' } }],
+    fields: [sessionToken],
+    examples: [{ id: 'destroy', title: 'Delete outright', description: 'No tombstone: the record goes, the cookie is cleared and the credential answers not_found right away.', values: { token: '$cookie' } }],
     call: (v) => `await redis.sessions.destroy(${tok(v.token)})`,
+    body: sessionTokenBody,
   },
   'session.setSecurityVersion': {
     fields: [{ name: 'userId', label: 'userId', kind: 'text' }, { name: 'version', label: 'version', kind: 'number' }],
     examples: [
-      { id: 'reset', title: 'Password reset', description: 'Bump to 2: every session created with 1 now validates as invalid.', values: { userId: 'user-42', version: 2 } },
+      { id: 'reset', title: 'Password reset', description: 'Bump to 2: nothing is deleted, but every session created with 1 now validates as invalid. The create example “Log in after a password reset” gets a valid one.', values: { userId: 'user-42', version: 2 } },
       { id: 'bad', title: 'Not a whole number', description: '1.5 is rejected: SESSION_INVALID.', values: { userId: 'user-42', version: 1.5 } },
     ],
     call: (v) => `await redis.sessions.setSecurityVersion(${q(v.userId)}, ${v.version})`,
+    body: (v) => ({ userId: v.userId, version: Number(v.version) }),
   },
   'session.revokeAll': {
-    fields: [{ name: 'userId', label: 'userId', kind: 'text' }, { name: 'limit', label: 'limit', kind: 'number' }],
+    fields: [{ name: 'userId', label: 'userId', kind: 'text' }, { name: 'limit', label: 'limit', kind: 'number', help: 'blank: maxBatchSize, 200' }],
     examples: [
-      { id: 'all', title: 'Log out everywhere', description: 'Deletes the user\'s sessions (no tombstones): they answer not_found.', values: { userId: 'user-42', limit: 200 } },
+      { id: 'all', title: 'Log out everywhere', description: 'Deletes the user\'s sessions outright (no tombstones): they answer not_found. Tombstones already out of the session set stay until they expire.', values: { userId: 'user-42', limit: 200 } },
       { id: 'batch', title: 'One at a time', description: 'limit 1: watch { affected, remaining } count down.', values: { userId: 'user-42', limit: 1 } },
     ],
-    call: (v) => `await redis.sessions.revokeAll(${q(v.userId)}, ${v.limit})`,
+    call: (v) => `await redis.sessions.revokeAll(${q(v.userId)}${v.limit !== '' ? `, ${v.limit}` : ''})`,
+    body: (v) => ({ userId: v.userId, limit: optional(v.limit) }),
   },
   'session.list': {
-    fields: [{ name: 'userId', label: 'userId', kind: 'text' }],
-    examples: [{ id: 'list', title: 'My devices', description: 'Live sessions in the user\'s session set, expired ones left out.', values: { userId: 'user-42' } }],
-    call: (v) => `await redis.sessions.list(${q(v.userId)}, 0, 50)`,
+    fields: [
+      { name: 'userId', label: 'userId', kind: 'text' },
+      { name: 'offset', label: 'offset', kind: 'number' },
+      { name: 'limit', label: 'limit', kind: 'number', help: 'at most maxBatchSize, 200' },
+    ],
+    examples: [
+      { id: 'list', title: 'My devices', description: 'Live sessions in the user\'s session set; tombstones and expired ones are left out (the table below shows everything Redis holds).', values: { userId: 'user-42', offset: 0, limit: 50 } },
+      { id: 'too-many', title: 'A page over maxBatchSize', description: 'limit 500: SESSION_LIMIT (413).', values: { userId: 'user-42', offset: 0, limit: 500 } },
+    ],
+    call: (v) => `await redis.sessions.list(${q(v.userId)}, ${v.offset}, ${v.limit})`,
+    body: (v) => ({ userId: v.userId, offset: optional(v.offset), limit: optional(v.limit) }),
   },
 
   'cache.set': {

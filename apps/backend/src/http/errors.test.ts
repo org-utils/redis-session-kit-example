@@ -69,6 +69,11 @@ test('the body carries the error class name and message', async () => {
   assert.deepEqual(error, { code: 'LOCK_HELD', name: 'LockError', message: 'lock job:1 is held', mode: 'cluster' });
 });
 
+test("a session error names its own class, though the package's name for every one is SessionError", async () => {
+  const { error } = await call('/api/cluster/failing/throw/session-replay');
+  assert.deepEqual([error.code, error.name], ['SESSION_REPLAY', 'SessionReplayError']);
+});
+
 test("a raw Redis error answers 502 with Redis's own message", async () => {
   const { status, error } = await call('/api/cluster/failing/crossslot');
   assert.equal(status, 502);

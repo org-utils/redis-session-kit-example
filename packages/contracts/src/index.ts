@@ -347,6 +347,15 @@ export const SessionUpdateRequestSchema = z.object({
   expectedVersion: z.number().optional(),
 });
 
+/** The user-level operations. The package validates the numbers itself (SESSION_INVALID for a version of 1.5…). */
+export const SessionSecurityVersionRequestSchema = z.object({ userId: z.string(), version: z.number() });
+export const SessionRevokeAllRequestSchema = z.object({ userId: z.string(), limit: z.number().optional() });
+export const SessionListRequestSchema = z.object({
+  userId: z.string(),
+  offset: z.number().optional(),
+  limit: z.number().optional(),
+});
+
 /** The session cookie this mode's request arrived with: what the browser holds, since it is HttpOnly. */
 export const SessionCookieSchema = z.object({ name: z.string(), value: z.string().nullable() });
 export type SessionCookie = z.infer<typeof SessionCookieSchema>;
@@ -361,6 +370,61 @@ export const SessionStoredSchema = z.object({
   ttl: z.number().nullable(),
 });
 export type SessionStored = z.infer<typeof SessionStoredSchema>;
+
+/** The package's answer to validate() for a credential that cannot authenticate. */
+export const SessionInvalidReasonSchema = z.enum([
+  'not_found', 'expired', 'idle_timeout', 'absolute_timeout', 'revoked', 'consumed', 'invalid',
+]);
+export type SessionInvalidReason = z.infer<typeof SessionInvalidReasonSchema>;
+
+/** A session record as the package stores it, decrypted: the fields the live table shows (the rest are kept as is). */
+export const SessionRecordSchema = z.looseObject({
+  id: z.string(),
+  jti: z.string(),
+  userId: z.string(),
+  createdAt: z.number(),
+  lastAccessedAt: z.number(),
+  expiresAt: z.number(),
+  idleExpiresAt: z.number().nullable(),
+  absoluteExpiresAt: z.number().nullable(),
+  status: z.enum(['active', 'consumed', 'revoked']),
+  version: z.number(),
+  securityVersion: z.number().nullable(),
+  deviceId: z.string().optional(),
+  /** The predecessor's jti, on a session rotation created. */
+  rotatedFrom: z.string().optional(),
+  /** On a consumed session: the successor it was consumed for. */
+  successorId: z.string().optional(),
+  successorJti: z.string().optional(),
+});
+export type SessionRecord = z.infer<typeof SessionRecordSchema>;
+
+export const SessionRecordsQuerySchema = z.object({ userId: z.string() });
+/**
+ * The live table: every session record Redis holds for a user on this mode, tombstones included, read natively (SCAN of
+ * the user's slot, then one read of it all at one instant) and decrypted with the showcase's key manager. Not a package
+ * call: list() leaves out tombstones and anything expired.
+ */
+export const SessionRecordsSchema = z.object({
+  userId: z.string(),
+  /** Redis server time (seconds) of the read, which every expiry is measured against. */
+  serverTime: z.number(),
+  /** The user's stored security version, or null when none is stored. */
+  securityVersion: z.number().nullable(),
+  /** Oldest first. */
+  sessions: z.array(z.object({
+    key: z.string(),
+    /** Seconds the key has left (a tombstone's countdown), or null without an expiry. */
+    ttl: z.number().nullable(),
+    /** Whether the user's session set holds it: only a member can authenticate, and rotate and revoke remove it. */
+    inSessionSet: z.boolean(),
+    /** The record decrypted, or null when it can't be. */
+    session: SessionRecordSchema.nullable(),
+    /** What validate() would answer for its credential at serverTime: null when it would be valid. */
+    reason: SessionInvalidReasonSchema.nullable(),
+  })),
+});
+export type SessionRecords = z.infer<typeof SessionRecordsSchema>;
 
 /** What the package reported to this mode's metrics sink since the backend started, one entry per name and labels. */
 export const SessionMetricsSnapshotSchema = z.object({
