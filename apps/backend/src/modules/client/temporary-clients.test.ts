@@ -151,7 +151,11 @@ for (const mode of MODES) {
         const { args } = redis.commands.find((c: { name: string }) => c.name === 'xread');
         assert.equal(args[args.indexOf('BLOCK') + 1], '0');
         // The subscribe after close never reached Redis, so the trace lists only the first.
-        assert.equal(redis.commands.filter((c: { name: string }) => c.name === 'subscribe').length, 1);
+        // On sentinel the failover detector's subscribes to the sentinels are in the trace too; they are left out.
+        const subscribes = redis.commands.filter(
+          (c: { name: string; args: string[] }) => c.name === 'subscribe' && c.args[0] !== '+switch-master',
+        );
+        assert.equal(subscribes.length, 1);
       });
 
       test('close twice: the second close resolves too', async () => {
