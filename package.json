@@ -7,7 +7,10 @@
     "node": ">=24"
   },
   "scripts": {
-    "dev": "pnpm --filter frontend dev",
+    "dev": "node scripts/ensure-env.mjs && pnpm infra:up && pnpm dev:apps",
+    "dev:apps": "node scripts/ensure-env.mjs && pnpm --parallel --filter backend --filter frontend dev",
+    "test": "pnpm --filter backend test",
+    "typecheck": "pnpm -r typecheck",
     "infra:up": "node scripts/compose.mjs all up -d --wait",
     "infra:stop": "node scripts/compose.mjs all stop",
     "infra:down": "node scripts/compose.mjs all down -v",

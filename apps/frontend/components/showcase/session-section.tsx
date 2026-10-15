@@ -10,7 +10,8 @@ import { Card, CardAction, CardContent, CardDescription, CardFooter, CardHeader,
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { spec, type Values } from '@/lib/showcase/examples';
-import type { Mode, RunResult } from '@/lib/showcase/mock-backend';
+import type { Mode } from '@showcase/contracts';
+import type { RunResult } from '@/lib/showcase/mock-backend';
 import type { Status, useSessionLab } from '@/lib/showcase/mock-sessions';
 import { RequestForm, type TokenOption } from './request-form';
 import { HttpBadge, Json } from './result-display';

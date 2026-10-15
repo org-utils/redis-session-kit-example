@@ -8,7 +8,7 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { spec, type Values } from '@/lib/showcase/examples';
-import type { Mode } from '@/lib/showcase/mock-backend';
+import type { Mode } from '@showcase/contracts';
 import { RequestForm, type TokenOption } from './request-form';
 import { Json } from './result-display';
 
