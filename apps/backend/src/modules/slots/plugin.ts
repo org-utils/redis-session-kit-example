@@ -1,12 +1,10 @@
 // The slots mode-specific module, registered on cluster only under /api/cluster/slots: where keys land (asked of Redis,
 // not computed here) and what each master holds. The package's slot helpers aren't public, so these are native CLUSTER,
 // DBSIZE, SCAN and CLIENT LIST commands on connections of the showcase's own.
-import {
-  SlotsInspectRequestSchema, type SlotsInspectResult, type SlotsOverview,
-} from '@showcase/contracts';
+import { SlotsInspectRequestSchema, type ClientKind, type SlotsInspectResult, type SlotsOverview } from '@showcase/contracts';
 import type { Redis } from 'ioredis';
 import type { ModeSpecificModule } from '../../app.ts';
-import { firstReachable, oneOff } from '../../redis/first-reachable.ts';
+import { firstReachable, oneOff, pairs, PROBE_NAME } from '../../redis/own-connections.ts';
 import { untraced } from '../../redis/redis-trace.ts';
 
 type Shard = SlotsInspectResult['shards'][number];
@@ -14,25 +12,35 @@ type Node = SlotsOverview['nodes'][number];
 
 /** Enough to show what each namespace holds; a node with more is reported as truncated. */
 const SCAN_LIMIT = 10_000;
-const CLIENT_KINDS = ['subscriber', 'blocked read', 'ioredis', 'other'];
+const CLIENT_KINDS: ClientKind[] = ['subscriber', 'blocked read', 'ioredis', 'showcase probe', 'other'];
 
-/** `[field, value, …]` → `{ field: value, … }`, the shape of CLUSTER SHARDS entries. */
-function fields(flat: unknown[]): Record<string, unknown> {
-  const out: Record<string, unknown> = {};
-  for (let i = 0; i < flat.length; i += 2) out[String(flat[i])] = flat[i + 1];
-  return out;
+/** CLIENT LIST line → `{ id: '7', flags: 'N', … }`. A value can itself hold `=`, so each pair splits at the first. */
+function clientFields(line: string): Record<string, string> {
+  return Object.fromEntries(line.split(' ').map((pair) => {
+    const at = pair.indexOf('=');
+    return [pair.slice(0, at), pair.slice(at + 1)];
+  }));
+}
+
+function clientKind(client: Record<string, string>): ClientKind {
+  if (Number(client.sub) + Number(client.psub) + Number(client.ssub ?? 0) > 0) return 'subscriber';
+  if (client.flags?.includes('b')) return 'blocked read';
+  if (client.name === PROBE_NAME) return 'showcase probe';
+  return client['lib-name'] === 'ioredis' ? 'ioredis' : 'other';
 }
 
 /** Each master and its slot ranges, from CLUSTER SHARDS, by address. */
 async function shardsOf(redis: Redis): Promise<Shard[]> {
   const reply = (await redis.call('CLUSTER', 'SHARDS')) as unknown[][];
   const shards = reply.map((entry) => {
-    const shard = fields(entry);
+    const shard = pairs<unknown>(entry);
     const flat = (shard.slots as number[]).map(Number);
     const slots = [];
     for (let i = 0; i < flat.length; i += 2) slots.push({ start: flat[i], end: flat[i + 1] });
-    const master = (shard.nodes as unknown[][]).map(fields).find((n) => n.role === 'master');
-    return { node: master ? `${master.endpoint ?? master.ip}:${master.port}` : 'unknown', slots };
+    const master = (shard.nodes as unknown[][]).map((n) => pairs<string>(n)).find((n) => n.role === 'master');
+    // `endpoint` can be empty or `?` (no preferred endpoint announced): the ip is then where it listens.
+    const host = master && (master.endpoint && master.endpoint !== '?' ? master.endpoint : master.ip);
+    return { node: master ? `${host}:${master.port}` : 'unknown', slots };
   });
   return shards.sort((a, b) => a.node.localeCompare(b.node));
 }
@@ -63,13 +71,11 @@ async function nodeOverview({ node, slots }: Shard): Promise<Node> {
     // Every connection on this node but this one, by kind.
     const self = String(await redis.call('CLIENT', 'ID'));
     const list = String(await redis.call('CLIENT', 'LIST'));
-    const counts = new Map<string, number>();
+    const counts = new Map<ClientKind, number>();
     for (const line of list.split('\n').filter(Boolean)) {
-      const client = Object.fromEntries(line.split(' ').map((pair) => pair.split('=') as [string, string]));
+      const client = clientFields(line);
       if (client.id === self) continue;
-      const kind = Number(client.sub) + Number(client.psub) + Number(client.ssub ?? 0) > 0
-        ? 'subscriber'
-        : client.flags?.includes('b') ? 'blocked read' : client['lib-name'] === 'ioredis' ? 'ioredis' : 'other';
+      const kind = clientKind(client);
       counts.set(kind, (counts.get(kind) ?? 0) + 1);
     }
     const clients = CLIENT_KINDS.filter((kind) => counts.has(kind)).map((kind) => ({ kind, count: counts.get(kind)! }));

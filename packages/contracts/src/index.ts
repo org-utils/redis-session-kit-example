@@ -451,6 +451,14 @@ export const SlotsInspectResultSchema = z.object({
 export type SlotsInspectResult = z.infer<typeof SlotsInspectResultSchema>;
 
 /**
+ * A connection in CLIENT LIST, by what it is doing: `subscriber` (Pub/Sub), `blocked read` (a stream read waiting:
+ * between reads, its leased client looks like any other), `ioredis` (any other ioredis connection: a mode client,
+ * an idle stream reader…), `showcase probe` (the showcase's own, named `showcase-probe`) or `other` (redis-cli…).
+ */
+export const ClientKindSchema = z.enum(['subscriber', 'blocked read', 'ioredis', 'showcase probe', 'other']);
+export type ClientKind = z.infer<typeof ClientKindSchema>;
+
+/**
  * Each master, read on demand with native commands (not the package): its slot ranges, `DBSIZE`, the showcase's keys
  * grouped by namespace (`SCAN showcase:*`), and its client connections by kind (`CLIENT LIST`, every process's).
  */
@@ -464,11 +472,7 @@ export const SlotsOverviewSchema = z.object({
       namespaces: z.record(z.string(), z.number()),
       /** The scan stopped early: the namespace counts are a lower bound. */
       truncated: z.boolean(),
-      /**
-       * `subscriber` (Pub/Sub), `blocked read` (a stream read waiting), `ioredis` (any other ioredis connection) or
-       * `other` (redis-cli, RedisInsight…).
-       */
-      clients: z.array(z.object({ kind: z.string(), count: z.number() })),
+      clients: z.array(z.object({ kind: ClientKindSchema, count: z.number() })),
       error: z.string().optional(),
     }),
   ),

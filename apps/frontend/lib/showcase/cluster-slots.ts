@@ -1,7 +1,8 @@
 // The slots section's data: where keys land and what each node holds, asked of the real cluster through
 // /api/cluster/slots (CLUSTER KEYSLOT, CLUSTER SHARDS, DBSIZE, SCAN, CLIENT LIST). Nothing is computed here but which
 // part of a key Redis hashes, to highlight it.
-import { SlotsOverviewSchema, type SlotsOverview } from '@showcase/contracts';
+import { SlotsOverviewSchema, type ClientRawRequestSchema, type SlotsOverview } from '@showcase/contracts';
+import type { z } from 'zod';
 
 export function parseKeys(s: string): string[] {
   return s.split(/[\n,]/).map((k) => k.trim()).filter(Boolean);
@@ -26,7 +27,7 @@ export async function fetchOverview(): Promise<SlotsOverview> {
 
 /** The run buttons: raw multi-key commands on the keys, through the client section's raw route. */
 export type RunKind = 'mget' | 'mgetClusterAware' | 'eval';
-export const TWO_KEY_SCRIPT = "return {redis.call('GET', KEYS[1]), redis.call('GET', KEYS[2])}";
-export function runBody(kind: RunKind, keys: string[]) {
+const TWO_KEY_SCRIPT = "return {redis.call('GET', KEYS[1]), redis.call('GET', KEYS[2])}";
+export function runBody(kind: RunKind, keys: string[]): z.input<typeof ClientRawRequestSchema> {
   return kind === 'eval' ? { command: 'eval', script: TWO_KEY_SCRIPT, keys: keys.slice(0, 2), args: [] } : { command: kind, keys };
 }

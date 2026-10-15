@@ -12,14 +12,23 @@ import { cn } from '@/lib/utils';
 import { runOperation, type RunResult } from '@/lib/showcase/api';
 import { fetchOverview, hashed, parseKeys, runBody, type RunKind } from '@/lib/showcase/cluster-slots';
 import { spec, type Values } from '@/lib/showcase/examples';
-import { SlotsInspectResultSchema, type SlotsInspectResult, type SlotsOverview } from '@showcase/contracts';
+import { SlotsInspectResultSchema, type ClientKind, type SlotsInspectResult, type SlotsOverview } from '@showcase/contracts';
 import { RequestForm } from './request-form';
-import { Commands, HttpBadge, Json } from './result-display';
+import { Commands, HttpBadge, Json, KeysTable } from './result-display';
 
 // Node identity uses the cluster mode colour at three strengths (tokens only).
 const NODE_BG = ['bg-mode-cluster/25', 'bg-mode-cluster/45', 'bg-mode-cluster/65'];
 const INSPECT_DEBOUNCE_MS = 300;
 const port = (address: string) => address.split(':').pop();
+
+/** What each kind of connection in CLIENT LIST is, for the node overview. */
+const CLIENT_NOTE: Record<ClientKind, string> = {
+  subscriber: 'a Pub/Sub subscriber: the package pins it to one node',
+  'blocked read': 'a stream read waiting: each read leases a Cluster client of its own, which looks like any other ioredis connection between reads',
+  ioredis: 'mode clients, idle stream readers, temporary clients (this backend or another)',
+  'showcase probe': "the showcase's own connections (status checks, this overview), not the package's",
+  other: 'redis-cli, RedisInsight…',
+};
 
 function KeyText({ k }: { k: string }) {
   const h = hashed(k);
@@ -52,6 +61,7 @@ function RunResultCard({ r }: { r: RunResult }) {
       <CardContent className="space-y-2">
         <div className="text-xs text-muted-foreground">Sent, and to which node:</div>
         <Commands r={r} />
+        {r.keys.length > 0 && <><div className="text-xs text-muted-foreground">The keys, by slot and node:</div><KeysTable keys={r.keys} mode="cluster" /></>}
         <Json value={r.body} />
       </CardContent>
     </Card>
@@ -72,7 +82,7 @@ function NodeDetail({ n }: { n: SlotsOverview['nodes'][number] }) {
       <div>
         <div className="mb-1 text-xs font-medium text-muted-foreground">client connections (every process&apos;s, CLIENT LIST)</div>
         <ul className="space-y-0.5 text-xs">
-          {n.clients.map((c) => <li key={c.kind}><span className="font-mono">{c.count}×</span> {c.kind}{c.kind === 'subscriber' && <span className="text-muted-foreground"> · a Pub/Sub subscriber sits on one node only</span>}{c.kind === 'blocked read' && <span className="text-muted-foreground"> · each stream read leases a Cluster client of its own</span>}</li>)}
+          {n.clients.map((c) => <li key={c.kind}><span className="font-mono">{c.count}×</span> {c.kind}<span className="text-muted-foreground"> · {CLIENT_NOTE[c.kind]}</span></li>)}
           {!n.clients.length && <li className="text-muted-foreground">none</li>}
         </ul>
       </div>

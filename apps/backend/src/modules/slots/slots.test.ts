@@ -101,4 +101,21 @@ describe('node overview', () => {
       await card.close();
     }
   });
+
+  test('a stream read shows as a blocked read while it waits; the showcase\'s own probes are listed apart', async () => {
+    const follower = await openSse(`${base}/api/cluster/streams/slots-test/follow`);
+    try {
+      await follower.next(); // following: the shared read loop has started
+      await new Promise((resolve) => setTimeout(resolve, 300));
+      const { nodes } = await overview();
+      const count = (kind: string) => nodes.reduce(
+        (n: number, node: { clients: { kind: string; count: number }[] }) => n + (node.clients.find((c) => c.kind === kind)?.count ?? 0), 0,
+      );
+      assert.ok(count('blocked read') >= 1, JSON.stringify(nodes.map((n: { clients: unknown }) => n.clients)));
+      // The status monitor's probes (one per seed node) are named showcase-probe, not counted as the package's.
+      assert.ok(count('showcase probe') >= 3, JSON.stringify(nodes.map((n: { clients: unknown }) => n.clients)));
+    } finally {
+      await follower.close();
+    }
+  });
 });
