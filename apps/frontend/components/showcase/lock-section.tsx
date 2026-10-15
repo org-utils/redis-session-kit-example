@@ -3,13 +3,14 @@
 'use client';
 
 import { Lock } from 'lucide-react';
-import { useRef, useState } from 'react';
+import { useState } from 'react';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { cn } from '@/lib/utils';
 import { runOperation, type RunResult } from '@/lib/showcase/api';
 import { spec, type Values } from '@/lib/showcase/examples';
 import { useLease } from '@/lib/showcase/use-lease';
+import { useNow } from '@/lib/showcase/use-now';
 import { MODES, type Mode } from '@showcase/contracts';
 import { OpForm } from './op-form';
 
@@ -25,19 +26,23 @@ export function LockSection({ mode, onResult }: { mode: Mode; onResult: (r: RunR
   const lease = useLease(mode, name);
   // Tokens this browser was handed, per mode and lane, newest first; and each lane's `using` still running.
   const [tokens, setTokens] = useState(() => perMode<Record<Lane, string[]>>(() => ({ A: [], B: [] })));
-  const [working, setWorking] = useState(() => perMode<Record<Lane, number>>(() => ({ A: 0, B: 0 })));
+  // Per lane: how many `using` calls are open, and when the longest one's work ends.
+  const [working, setWorking] = useState(() => perMode<Record<Lane, { open: number; until: number }>>(() => ({ A: { open: 0, until: 0 }, B: { open: 0, until: 0 } })));
   const lanes = tokens[mode];
+  const now = useNow();
+  const workLeft = (lane: Lane) => (working[mode][lane].open ? Math.max(0, working[mode][lane].until - now) : 0);
 
   const held = lease?.token ?? null;
   // A `using` lane learns its token only when the work ends: until then, a lease no lane knows is that lane's.
   const holder = LANES.find((l) => held && lanes[l].includes(held))
-    ?? (held ? LANES.find((l) => working[mode][l] > 0) : undefined);
+    ?? (held ? LANES.find((l) => working[mode][l].open > 0) : undefined);
 
   // The bar's full width: the longest TTL seen for the current token (an extend can lengthen it).
-  const full = useRef<{ token: string | null; ms: number }>({ token: null, ms: 0 });
-  if (lease?.token !== full.current.token) full.current = { token: lease?.token ?? null, ms: 0 };
-  full.current.ms = Math.max(full.current.ms, lease?.ttlMs ?? 0);
+  const [full, setFull] = useState<{ token: string | null; ms: number }>({ token: null, ms: 0 });
   const left = lease?.ttlMs ?? 0;
+  const token = lease?.token ?? null;
+  const scale = token === full.token ? Math.max(full.ms, left) : left;
+  if (token !== full.token || scale !== full.ms) setFull({ token, ms: scale });
 
   const tokenOf = (v: string) => (v === '$A' ? lanes.A[0] ?? '' : v === '$B' ? lanes.B[0] ?? '' : v);
   const keep = (lane: Lane, token: unknown) => {
@@ -48,13 +53,17 @@ export function LockSection({ mode, onResult }: { mode: Mode; onResult: (r: RunR
     const lane = v.lane as Lane;
     const at = mode;
     setName(String(v.name));
-    if (op === 'using') setWorking((w) => ({ ...w, [at]: { ...w[at], [lane]: w[at][lane] + 1 } }));
+    const work = (delta: 1 | -1) => setWorking((w) => {
+      const { open, until } = w[at][lane];
+      return { ...w, [at]: { ...w[at], [lane]: { open: open + delta, until: delta > 0 ? Math.max(until, Date.now() + Number(v.work) * 1000) : until } } };
+    });
+    if (op === 'using') work(1);
     try {
       const r = await runOperation(at, 'lock', op, () => spec('lock', op).body!({ ...v, token: tokenOf(String(v.token ?? '')) }));
       if (r.httpStatus === 200) keep(lane, (r.body as { token?: unknown } | null)?.token);
       return r;
     } finally {
-      if (op === 'using') setWorking((w) => ({ ...w, [at]: { ...w[at], [lane]: w[at][lane] - 1 } }));
+      if (op === 'using') work(-1);
     }
   };
   const options = [
@@ -72,12 +81,12 @@ export function LockSection({ mode, onResult }: { mode: Mode; onResult: (r: RunR
         <CardContent className="space-y-3">
           <div className="h-3 overflow-hidden rounded-full bg-muted">
             <div className={cn('h-full transition-[width] duration-200 ease-linear', held ? 'bg-mode-standalone' : 'bg-transparent')}
-              style={{ width: `${held && full.current.ms ? Math.min(100, (left / full.current.ms) * 100) : 0}%` }} />
+              style={{ width: `${held && scale ? Math.min(100, (left / scale) * 100) : 0}%` }} />
           </div>
           <div className="font-mono text-xs text-muted-foreground">
             {!lease ? 'reading…' : held ? (
               <>held by <span className="font-medium text-foreground">{holder ?? 'another client'}</span> · {(left / 1000).toFixed(1)}s left · token {short(held)}
-                {holder && working[mode][holder] > 0 && <> · working</>}</>
+                {holder && working[mode][holder].open > 0 && <> · working {(workLeft(holder) / 1000).toFixed(1)}s</>}</>
             ) : 'free'}
           </div>
           <div className="grid grid-cols-2 gap-3">
@@ -88,8 +97,8 @@ export function LockSection({ mode, onResult }: { mode: Mode; onResult: (r: RunR
                   <div className="flex items-center justify-between text-sm font-medium">Holder {lane} {holds ? <Badge className="bg-success text-success-foreground">holds</Badge> : <Badge variant="outline">waiting</Badge>}</div>
                   <ul className="space-y-0.5 font-mono text-[11px] text-muted-foreground">
                     {lanes[lane].map((t, i) => <li key={t} className={cn(i === 0 && 'text-foreground')}>{short(t)}{held === t && ' ← lease'}</li>)}
-                    {working[mode][lane] > 0 && <li className="text-warning">using() running…</li>}
-                    {!lanes[lane].length && !working[mode][lane] && <li>no tokens yet</li>}
+                    {working[mode][lane].open > 0 && <li className="text-warning">using() working, {(workLeft(lane) / 1000).toFixed(1)}s left</li>}
+                    {!lanes[lane].length && !working[mode][lane].open && <li>no tokens yet</li>}
                   </ul>
                 </div>
               );
