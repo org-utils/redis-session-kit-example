@@ -17,6 +17,8 @@ export interface ModeView {
   available: boolean;
   detail: string[];
   failoverReady?: boolean;
+  /** Sentinel only: `host:port` of the master Sentinel names. */
+  master?: string;
 }
 
 const EVENTS_KEPT = 300;
@@ -49,6 +51,7 @@ function toView(mode: Mode, status: ModeStatus | undefined): ModeView {
     available: status.available,
     detail,
     ...(sentinel && { failoverReady: sentinel.failoverReady }),
+    ...(sentinel?.master && { master: sentinel.master }),
   };
 }
 
@@ -96,4 +99,12 @@ export const REDIS_INSIGHT: Record<Mode, string> = {
   sentinel: 'http://localhost:5541',
   cluster: 'http://localhost:5540',
 };
-export const redisCli = (mode: Mode) => `pnpm redis:${mode}`;
+/**
+ * `pnpm redis:<mode>` opens redis-cli on that mode's stack; with a key, it reads it (GET for a string, TTL otherwise).
+ * Sentinel's redis-cli connects to a sentinel, so a key is read with `-p` pointing at the master Sentinel names.
+ */
+export function redisCli(mode: Mode, key?: { key: string; type: string }, master?: string): string {
+  if (!key || (mode === 'sentinel' && !master)) return `pnpm redis:${mode}`;
+  const port = mode === 'sentinel' ? ` -p ${master!.split(':').pop()}` : '';
+  return `pnpm redis:${mode}${port} ${key.type === 'string' ? 'GET' : 'TTL'} '${key.key.replaceAll("'", "'\\''")}'`;
+}

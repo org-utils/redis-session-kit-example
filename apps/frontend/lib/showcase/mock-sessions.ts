@@ -4,7 +4,7 @@
 
 import { useCallback, useRef, useState } from 'react';
 import type { Mode } from '@showcase/contracts';
-import type { KeyTouched, RunResult } from './mock-backend';
+import type { KeyTouched, RunResult } from './api';
 import { nodeOf, slotOf } from './mock-backend';
 
 export type Status = 'active' | 'consumed' | 'revoked';

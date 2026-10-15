@@ -29,7 +29,7 @@ const failing: FeatureModule = async (app, { client }) => {
   app.get('/validated', { schema: { querystring: z.object({ n: z.coerce.number().int() }) } }, async () => 'ok');
 };
 
-const app = await buildApp({ config: testConfig({ SHOWCASE_MODES: 'cluster' }), modules: [failing] });
+const app = await buildApp({ config: testConfig({ SHOWCASE_MODES: 'cluster' }), modules: { failing } });
 before(() => app.ready());
 after(() => app.close());
 
@@ -50,25 +50,25 @@ const cases: [kind: string, status: number, code: string][] = [
 ];
 for (const [kind, status, code] of cases) {
   test(`${code} answers ${status}`, async () => {
-    const res = await call(`/api/cluster/throw/${kind}`);
+    const res = await call(`/api/cluster/failing/throw/${kind}`);
     assert.deepEqual([res.status, res.error.code, res.error.mode], [status, code, 'cluster']);
   });
 }
 
 test('the body carries the error class name and message', async () => {
-  const { error } = await call('/api/cluster/throw/lock-held');
+  const { error } = await call('/api/cluster/failing/throw/lock-held');
   assert.deepEqual(error, { code: 'LOCK_HELD', name: 'LockError', message: 'lock job:1 is held', mode: 'cluster' });
 });
 
 test("a raw Redis error answers 502 with Redis's own message", async () => {
-  const { status, error } = await call('/api/cluster/crossslot');
+  const { status, error } = await call('/api/cluster/failing/crossslot');
   assert.equal(status, 502);
   assert.equal(error.code, 'CROSSSLOT');
   assert.match(error.message, /^CROSSSLOT /);
 });
 
 test('invalid input answers 400 with Fastify’s validation code', async () => {
-  const { status, error } = await call('/api/cluster/validated?n=abc');
+  const { status, error } = await call('/api/cluster/failing/validated?n=abc');
   assert.deepEqual([status, error.code], [400, 'FST_ERR_VALIDATION']);
 });
 

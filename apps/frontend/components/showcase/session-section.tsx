@@ -11,7 +11,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { spec, type Values } from '@/lib/showcase/examples';
 import type { Mode } from '@showcase/contracts';
-import type { RunResult } from '@/lib/showcase/mock-backend';
+import type { RunResult } from '@/lib/showcase/api';
 import type { Status, useSessionLab } from '@/lib/showcase/mock-sessions';
 import { RequestForm, type TokenOption } from './request-form';
 import { HttpBadge, Json } from './result-display';
