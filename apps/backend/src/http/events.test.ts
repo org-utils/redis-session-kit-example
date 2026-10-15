@@ -14,7 +14,7 @@ const faulty: FeatureModule = async (app, { client }) => {
   app.post('/faulty', async () => ({ receivers: await client.pubsub.publish('faulty', { n: 1 }) }));
 };
 
-const app = await buildApp({ config: testConfig({ SHOWCASE_MODES: 'standalone' }), modules: [faulty] });
+const app = await buildApp({ config: testConfig({ SHOWCASE_MODES: 'standalone' }), modules: { faulty } });
 let base: string;
 before(async () => {
   base = await app.listen({ port: 0, host: '127.0.0.1' });
@@ -66,7 +66,7 @@ test('sends the status, then the buffered entries, then live ones', async () => 
   const buffered = await events.nextOf('entry');
   assert.deepEqual([buffered.entry.mode, buffered.entry.kind, buffered.entry.message.split(' ')[0]], ['standalone', 'health', 'healthy']);
 
-  const res = await fetch(`${base}/api/standalone/faulty`, { method: 'POST' });
+  const res = await fetch(`${base}/api/standalone/faulty/faulty`, { method: 'POST' });
   assert.equal(res.status, 200);
   const live = await events.nextOf('entry');
   assert.deepEqual(

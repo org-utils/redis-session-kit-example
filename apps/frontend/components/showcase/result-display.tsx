@@ -7,11 +7,12 @@ import { Button } from '@/components/ui/button';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { cn } from '@/lib/utils';
 import type { Mode } from '@showcase/contracts';
-import type { KeyTouched, RunResult } from '@/lib/showcase/mock-backend';
+import type { KeyTouched, RunResult } from '@/lib/showcase/api';
 import { modeText } from '@/lib/showcase/mock-backend';
 import { REDIS_INSIGHT, healthDot, redisCli, type Health } from '@/lib/showcase/live';
 
 export function HttpBadge({ code }: { code: number }) {
+  if (code === 0) return <Badge variant="outline" className="font-mono">not sent</Badge>;
   if (code >= 500) return <Badge variant="destructive" className="font-mono">{code}</Badge>;
   if (code >= 400) return <Badge className="bg-warning font-mono text-warning-foreground">{code}</Badge>;
   return <Badge className="bg-success font-mono text-success-foreground">{code}</Badge>;
@@ -50,7 +51,7 @@ export function KeysTable({ keys, mode }: { keys: KeyTouched[]; mode: Mode }) {
           <TableRow key={k.key}>
             <TableCell className="max-w-56 whitespace-normal break-all text-code-key">{k.key}</TableCell>
             <TableCell>{k.type}</TableCell>
-            <TableCell>{k.ttl ?? '∞'}</TableCell>
+            <TableCell>{k.type === 'none' ? 'gone' : k.ttl ?? '∞'}</TableCell>
             {mode === 'cluster' && <TableCell className="text-code-slot">{k.slot} → {k.node?.split(':')[1]}</TableCell>}
           </TableRow>
         ))}
@@ -72,11 +73,13 @@ export function InsightLink({ mode }: { mode: Mode }) {
 export function Commands({ r }: { r: RunResult }) {
   return (
     <ul className="space-y-0.5 rounded-md bg-code p-3 font-mono text-xs text-code-foreground">
-      {r.commands.length ? r.commands.map((c, i) => <li key={i}>› {c}</li>) : <li className="text-muted-foreground">none</li>}
+      {r.commands.length ? r.commands.map((c, i) => <li key={i} className="break-all">› {c}</li>) : <li className="text-muted-foreground">none</li>}
+      {!!r.omitted?.commands && <li className="text-muted-foreground">… and {r.omitted.commands} more</li>}
     </ul>
   );
 }
 
-export function CliSnippet({ mode }: { mode: Mode }) {
-  return <code className="block break-all rounded-md bg-code p-2 font-mono text-[11px] text-code-foreground">{redisCli(mode)}</code>;
+/** The command to look at it yourself: the first touched key that still exists, or just the redis-cli prompt. */
+export function CliSnippet({ mode, keys = [], master }: { mode: Mode; keys?: KeyTouched[]; master?: string }) {
+  return <code className="block break-all rounded-md bg-code p-2 font-mono text-[11px] text-code-foreground">{redisCli(mode, keys.find((k) => k.type !== 'none'), master)}</code>;
 }

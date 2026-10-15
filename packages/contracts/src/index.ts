@@ -79,6 +79,57 @@ export const EventLogEntrySchema = z.object({
 });
 export type EventLogEntry = z.infer<typeof EventLogEntrySchema>;
 
+/* ───────────── Redis trace: every feature module response ───────────── */
+
+/** A command the package sent while the request ran, as ioredis sent it, and the node (`host:port`) it went to. */
+export const TracedCommandSchema = z.object({ name: z.string(), args: z.array(z.string()), node: z.string().nullable() });
+export type TracedCommand = z.infer<typeof TracedCommandSchema>;
+
+/** A key one of those commands touched, as it is after the request: its type (`none` once gone) and TTL. */
+export const TracedKeySchema = z.object({
+  key: z.string(),
+  type: z.string(),
+  /** Seconds left, or null when the key has no expiry or no longer exists. */
+  ttl: z.number().nullable(),
+  /** Cluster only: the key's hash slot and the master that owns it. */
+  slot: z.number().optional(),
+  node: z.string().optional(),
+});
+export type TracedKey = z.infer<typeof TracedKeySchema>;
+
+export const RedisTraceSchema = z.object({
+  commands: z.array(TracedCommandSchema),
+  keys: z.array(TracedKeySchema),
+  /** How many commands and keys were left out, when there were too many to show. */
+  omitted: z.object({ commands: z.number(), keys: z.number() }).optional(),
+});
+export type RedisTrace = z.infer<typeof RedisTraceSchema>;
+
+/** A 2xx from a feature module: the package's own result, untouched, and the Redis trace beside it. */
+export const TracedResultSchema = z.object({ result: z.unknown(), redis: RedisTraceSchema });
+export type TracedResult = z.infer<typeof TracedResultSchema>;
+
+/* ───────────── cache: POST /api/:mode/cache/<operation> ───────────── */
+
+// Only the shape is checked here: the package itself validates the values (a non-integer ttl, nx with xx…) and its
+// CACHE_INPUT error is what the visitor should see.
+export const CacheKeyRequestSchema = z.object({ key: z.string() });
+export const CacheGetRequestSchema = z.object({
+  key: z.string(),
+  /** Call `getValue(key)` (the value, or null on a miss) instead of `get(key)`. */
+  getValue: z.boolean().optional(),
+});
+export const CacheSetRequestSchema = z.object({
+  key: z.string(),
+  value: z.json(),
+  ttl: z.number().optional(),
+  nx: z.boolean().optional(),
+  xx: z.boolean().optional(),
+});
+export const CacheSetIfAbsentRequestSchema = z.object({ key: z.string(), value: z.json(), ttl: z.number().optional() });
+export const CacheDeleteRequestSchema = z.object({ keys: z.array(z.string()) });
+export const CacheClearRequestSchema = z.object({ pattern: z.string().optional() });
+
 /* ───────────── errors: every non-2xx response ───────────── */
 
 export const ErrorBodySchema = z.object({
@@ -90,6 +141,8 @@ export const ErrorBodySchema = z.object({
     /** The connection mode of the `/api/:mode` route that failed, or null when no such route matched (e.g. a 404). */
     mode: ModeSchema.nullable(),
   }),
+  /** On a feature module's error: what the package sent before it failed. */
+  redis: RedisTraceSchema.optional(),
 });
 export type ErrorBody = z.infer<typeof ErrorBodySchema>;
 

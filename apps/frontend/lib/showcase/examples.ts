@@ -12,12 +12,23 @@ export interface Field {
   help?: string;
 }
 export interface Example { id: string; title: string; description: string; values: Values }
-export interface OpSpec { fields: Field[]; examples: Example[]; call: (v: Values) => string }
+export interface OpSpec {
+  fields: Field[]; examples: Example[]; call: (v: Values) => string;
+  /** The request body sent to the backend, for sections that run for real. Throws when the values can't make one. */
+  body?: (v: Values) => unknown;
+}
 
 const q = (s: Value) => `'${s}'`;
 const json = (s: Value) => { try { return JSON.stringify(JSON.parse(String(s))); } catch { return String(s); } };
 const tok = (s: Value) => (s === '$cookie' ? 'cookieToken' : s === '$previous' ? 'previousToken' : q(s));
 const list = (s: Value) => String(s).split(',').map((x) => x.trim()).filter(Boolean);
+/** A JSON field's text as a value; a parse error names the field. */
+const parse = (s: Value, field: string) => {
+  try { return JSON.parse(String(s)); } catch { throw new Error(`${field} is not valid JSON: ${String(s)}`); }
+};
+/** A number field left blank means "not given", so the package's default applies. */
+const optional = (s: Value) => (s === '' ? undefined : Number(s));
+const cacheTtl = { name: 'ttl', label: 'ttl (seconds)', kind: 'number', help: 'blank: the default TTL, 300 s' } as const;
 
 export const OPS: Record<string, OpSpec> = {
   'client.health': {
@@ -149,32 +160,74 @@ export const OPS: Record<string, OpSpec> = {
     fields: [
       { name: 'key', label: 'key', kind: 'text' },
       { name: 'value', label: 'value (JSON)', kind: 'json' },
-      { name: 'ttl', label: 'ttl (seconds)', kind: 'number' },
-      { name: 'condition', label: 'condition', kind: 'select', options: ['none', 'nx', 'xx'] },
+      cacheTtl,
+      { name: 'nx', label: 'nx: only if absent', kind: 'boolean' },
+      { name: 'xx', label: 'xx: only if present', kind: 'boolean' },
     ],
     examples: [
-      { id: 'profile', title: 'Cache a user profile', description: 'A JSON value with the default 5-minute TTL.', values: { key: 'user:42', value: '{ "id": "42", "name": "Ada" }', ttl: 300, condition: 'none' } },
-      { id: 'nx', title: 'Write only if absent (NX)', description: 'Returns false when the key already exists.', values: { key: 'user:42', value: '{ "id": "42" }', ttl: 300, condition: 'nx' } },
-      { id: 'xx', title: 'Update only if present (XX)', description: 'Returns false when there is nothing to update.', values: { key: 'user:404', value: '{ "id": "404" }', ttl: 300, condition: 'xx' } },
-      { id: 'short', title: 'Short-lived value', description: 'Expires in 5 s; watch it vanish in RedisInsight.', values: { key: 'otp:42', value: '"731902"', ttl: 5, condition: 'none' } },
+      { id: 'profile', title: 'Cache a user profile', description: 'A JSON value for 5 minutes → true. Run this first: get, has and ttl read it.', values: { key: 'user:42', value: '{ "id": "42", "name": "Ada" }', ttl: 300, nx: false, xx: false } },
+      { id: 'short', title: 'Short-lived value', description: 'Expires in 5 s: watch its TTL in the Redis-state panel, then try has on otp:42.', values: { key: 'otp:42', value: '"731902"', ttl: 5, nx: false, xx: false } },
+      { id: 'xx', title: 'Update only if present (XX)', description: 'Nothing at user:404, so nothing is written → false.', values: { key: 'user:404', value: '{ "id": "404" }', ttl: 300, nx: false, xx: true } },
+      { id: 'both', title: 'NX and XX together', description: 'The package refuses before sending anything → 400 CACHE_INPUT, no commands.', values: { key: 'user:42', value: '{ "id": "42" }', ttl: 300, nx: true, xx: true } },
     ],
-    call: (v) => `await redis.cache.set(${q(v.key)}, ${json(v.value)}, { ttl: ${v.ttl}${v.condition !== 'none' ? `, ${v.condition}: true` : ''} })`,
+    call: (v) => {
+      const options = [v.ttl !== '' && `ttl: ${v.ttl}`, v.nx && 'nx: true', v.xx && 'xx: true'].filter(Boolean);
+      return `await redis.cache.set(${q(v.key)}, ${json(v.value)}${options.length ? `, { ${options.join(', ')} }` : ''})`;
+    },
+    body: (v) => ({ key: v.key, value: parse(v.value, 'value'), ttl: optional(v.ttl), nx: v.nx === true, xx: v.xx === true }),
   },
   'cache.get': {
+    fields: [{ name: 'key', label: 'key', kind: 'text' }, { name: 'getValue', label: 'getValue: just the value', kind: 'boolean' }],
+    examples: [
+      { id: 'hit', title: 'Hit', description: 'Run “Cache a user profile” (set) first → { hit: true, value }.', values: { key: 'user:42', getValue: false } },
+      { id: 'miss', title: 'Miss', description: '{ hit: false, value: null }: a cached null would still be a hit.', values: { key: 'user:missing', getValue: false } },
+      { id: 'value', title: 'Just the value', description: 'getValue(): the value itself, or null on a miss.', values: { key: 'user:42', getValue: true } },
+    ],
+    call: (v) => `await redis.cache.${v.getValue ? 'getValue' : 'get'}(${q(v.key)})`,
+    body: (v) => ({ key: v.key, getValue: v.getValue === true }),
+  },
+  'cache.has': {
     fields: [{ name: 'key', label: 'key', kind: 'text' }],
     examples: [
-      { id: 'hit', title: 'Hit', description: 'A key set by the profile example.', values: { key: 'user:42' } },
-      { id: 'miss', title: 'Miss', description: '{ hit: false } rather than null, so a cached null is distinguishable.', values: { key: 'user:missing' } },
+      { id: 'present', title: 'Present', description: 'After “Cache a user profile” → true.', values: { key: 'user:42' } },
+      { id: 'expired', title: 'Expired', description: 'Run “Short-lived value” (set), wait 5 s, then this → false.', values: { key: 'otp:42' } },
     ],
-    call: (v) => `await redis.cache.get(${q(v.key)})`,
+    call: (v) => `await redis.cache.has(${q(v.key)})`,
+    body: (v) => ({ key: v.key }),
+  },
+  'cache.ttl': {
+    fields: [{ name: 'key', label: 'key', kind: 'text' }],
+    examples: [
+      { id: 'left', title: 'Seconds left', description: 'After “Cache a user profile”: counts down from 300.', values: { key: 'user:42' } },
+      { id: 'missing', title: 'Missing key', description: '-2: Redis’s TTL reply as is (-1 would mean no expiry).', values: { key: 'user:missing' } },
+    ],
+    call: (v) => `await redis.cache.ttl(${q(v.key)})`,
+    body: (v) => ({ key: v.key }),
+  },
+  'cache.setIfAbsent': {
+    fields: [{ name: 'key', label: 'key', kind: 'text' }, { name: 'value', label: 'value (JSON)', kind: 'json' }, cacheTtl],
+    examples: [
+      { id: 'first', title: 'First writer wins', description: 'true the first time, false on every run after until the key expires or is deleted.', values: { key: 'job:42:result', value: '{ "status": "done" }', ttl: 60 } },
+    ],
+    call: (v) => `await redis.cache.setIfAbsent(${q(v.key)}, ${json(v.value)}${v.ttl !== '' ? `, ${v.ttl}` : ''})`,
+    body: (v) => ({ key: v.key, value: parse(v.value, 'value'), ttl: optional(v.ttl) }),
+  },
+  'cache.delete': {
+    fields: [{ name: 'keys', label: 'keys (comma separated)', kind: 'text' }],
+    examples: [
+      { id: 'several', title: 'Several keys at once', description: 'Counts only the keys that existed. On cluster these sit in different slots, so the package sends one DEL per slot.', values: { keys: 'user:42, otp:42, user:missing' } },
+    ],
+    call: (v) => `await redis.cache.delete(${list(v.keys).map(q).join(', ')})`,
+    body: (v) => ({ keys: list(v.keys) }),
   },
   'cache.clear': {
-    fields: [{ name: 'pattern', label: 'pattern', kind: 'text' }],
+    fields: [{ name: 'pattern', label: 'pattern', kind: 'text', help: 'a glob inside the namespace' }],
     examples: [
-      { id: 'all', title: 'Clear the namespace', description: 'SCAN + DEL; on cluster it scans every master.', values: { pattern: '*' } },
-      { id: 'users', title: 'Only user keys', description: 'A glob inside the namespace.', values: { pattern: 'user:*' } },
+      { id: 'users', title: 'Only user keys', description: 'SCAN + DEL of user:* only; other cache keys stay.', values: { pattern: 'user:*' } },
+      { id: 'all', title: 'The whole namespace', description: 'Everything under showcase:cache. On cluster it scans every master.', values: { pattern: '*' } },
     ],
     call: (v) => `await redis.cache.clear(${q(v.pattern)})`,
+    body: (v) => ({ pattern: v.pattern }),
   },
 
   'lock.acquire': {

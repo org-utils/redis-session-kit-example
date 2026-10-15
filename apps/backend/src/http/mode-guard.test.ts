@@ -11,13 +11,13 @@ const ping: FeatureModule = async (app, { client }) => {
 
 const app = await buildApp({
   config: testConfig({ REDIS_URL: 'redis://127.0.0.1:1', SHOWCASE_MODES: 'standalone,cluster' }),
-  modules: [ping],
+  modules: { probe: ping },
 });
 before(() => app.ready());
 after(() => app.close());
 
 test('a mode that has never been healthy answers 503 MODE_UNAVAILABLE without reaching the module', async () => {
-  const res = await app.inject('/api/standalone/ping');
+  const res = await app.inject('/api/standalone/probe/ping');
   assert.equal(res.statusCode, 503);
   const { error } = res.json();
   assert.deepEqual([error.code, error.name, error.mode], ['MODE_UNAVAILABLE', 'ModeUnavailableError', 'standalone']);
@@ -25,13 +25,13 @@ test('a mode that has never been healthy answers 503 MODE_UNAVAILABLE without re
 });
 
 test('an available mode reaches the module with its mode client', async () => {
-  const res = await app.inject('/api/cluster/ping');
+  const res = await app.inject('/api/cluster/probe/ping');
   assert.equal(res.statusCode, 200);
-  assert.deepEqual(res.json(), { pong: 'PONG' });
+  assert.deepEqual(res.json().result, { pong: 'PONG' });
 });
 
 test('a mode left out of SHOWCASE_MODES has no routes', async () => {
-  const res = await app.inject('/api/sentinel/ping');
+  const res = await app.inject('/api/sentinel/probe/ping');
   assert.equal(res.statusCode, 404);
   assert.equal(res.json().error.code, 'NOT_FOUND');
 });

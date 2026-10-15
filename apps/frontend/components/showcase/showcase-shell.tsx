@@ -2,7 +2,7 @@
 // opt-in compare across modes, a right-hand Redis-state panel and one collapsible event log for all modes.
 'use client';
 
-import { ChevronsUpDown, Database, Play } from 'lucide-react';
+import { ChevronsUpDown, Database, Eraser, Play } from 'lucide-react';
 import { useSearchParams } from 'next/navigation';
 import { useState } from 'react';
 import { ThemeToggle } from '@/components/theme-toggle';
@@ -22,7 +22,8 @@ import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { cn } from '@/lib/utils';
 import { spec, type Values } from '@/lib/showcase/examples';
 import { MODES, type Mode, type StatusResponse } from '@showcase/contracts';
-import { MODE_ICON, MODULES, MODULE_ICON, modeText, runOp, type RunResult } from '@/lib/showcase/mock-backend';
+import { runOperation, type RunResult } from '@/lib/showcase/api';
+import { MODE_ICON, MODULES, MODULE_ICON, modeText, runOp } from '@/lib/showcase/mock-backend';
 import { formatLatency, healthDot, healthText, useLive } from '@/lib/showcase/live';
 import { useSessionLab } from '@/lib/showcase/mock-sessions';
 import { RequestForm } from './request-form';
@@ -62,7 +63,19 @@ export function ShowcaseShell({ initialStatus }: { initialStatus: StatusResponse
     setModuleId(id); loadOp(id, m.ops[0].id);
     if (m.onlyMode) { setMode(m.onlyMode); setCompare(false); }
   };
-  const run = () => setResults((compare ? MODES : [mode]).map((md) => runOp(md, moduleId, op.id, values, status[md])));
+  const [running, setRunning] = useState(false);
+  const run = async () => {
+    const modes = compare ? MODES : [mode];
+    if (!mod.live) return setResults(modes.map((md) => runOp(md, moduleId, op.id, values, status[md])));
+    setRunning(true);
+    setResults(await Promise.all(modes.map((md) => runOperation(md, moduleId, op.id, () => opSpec.body!(values)))));
+    setRunning(false);
+  };
+  const resetSection = async () => {
+    setRunning(true);
+    setResults([await runOperation(mode, moduleId, 'reset', () => ({}))]);
+    setRunning(false);
+  };
   const focus = results.find((r) => r.mode === mode) ?? results[0];
   const s = status[focus?.mode ?? mode];
 
@@ -157,9 +170,19 @@ export function ShowcaseShell({ initialStatus }: { initialStatus: StatusResponse
         <div className="flex min-h-0 flex-1">
           <ScrollArea className="min-w-0 flex-1 [&_[data-slot=scroll-area-viewport]>div]:block!">
             <div className="@container space-y-5 p-6">
-              <div>
-                <h1 className="text-2xl font-semibold tracking-tight">{mod.label}</h1>
-                <p className="text-sm text-muted-foreground">{mod.blurb}</p>
+              <div className="flex flex-wrap items-start justify-between gap-4">
+                <div>
+                  <h1 className="text-2xl font-semibold tracking-tight">{mod.label}</h1>
+                  <p className="text-sm text-muted-foreground">{mod.blurb}</p>
+                </div>
+                {mod.live && (
+                  <div className="flex max-w-72 flex-col items-end gap-1 text-right">
+                    <Button variant="outline" size="sm" onClick={resetSection} disabled={running}><Eraser /> Reset section</Button>
+                    <span className="text-xs text-muted-foreground">
+                      A showcase convenience, not a package call: deletes <code className="font-mono">{mod.live.namespace}:*</code> on {mode}.
+                    </span>
+                  </div>
+                )}
               </div>
               {moduleId === 'session' ? (
                 <SessionSection mode={mode} lab={lab} last={results[0] ?? null} onResult={(r) => setResults([r])} />
@@ -185,7 +208,7 @@ export function ShowcaseShell({ initialStatus }: { initialStatus: StatusResponse
                 selected={modified ? null : exampleId} onPick={(ex) => { setExampleId(ex.id); setValues(ex.values); }}
                 onReset={() => example && setValues(example.values)}
                 footer={<>
-                  <Button onClick={run}><Play /> Run{compare ? ' on all modes' : ` on ${mode}`}</Button>
+                  <Button onClick={run} disabled={running}><Play /> Run{compare ? ' on all modes' : ` on ${mode}`}</Button>
                   {!mod.onlyMode && (
                     <div className="flex items-center gap-2">
                       <Checkbox id="compare" checked={compare} onCheckedChange={(v) => setCompare(v === true)} />
@@ -198,7 +221,7 @@ export function ShowcaseShell({ initialStatus }: { initialStatus: StatusResponse
                 {results.map((r) => (
                   <Card key={r.id} size="sm" onClick={() => setMode(r.mode)} className={cn('cursor-pointer', r.mode === focus?.mode && 'ring-2 ring-ring')}>
                     <CardHeader className="flex flex-row items-center justify-between">
-                      <CardTitle><ModeName mode={r.mode} /></CardTitle>
+                      <CardTitle className="flex items-baseline gap-2"><ModeName mode={r.mode} /><span className="font-mono text-xs font-normal text-muted-foreground">{r.op}()</span></CardTitle>
                       <div className="flex items-center gap-2 font-mono text-xs text-muted-foreground">{r.latencyMs}ms <HttpBadge code={r.httpStatus} /></div>
                     </CardHeader>
                     <CardContent><Json value={r.body} /></CardContent>
@@ -220,7 +243,8 @@ export function ShowcaseShell({ initialStatus }: { initialStatus: StatusResponse
                 </div>
                 {focus ? (
                   <>
-                    <div className="space-y-1"><Label className="text-xs text-muted-foreground">Keys touched</Label><KeysTable keys={focus.keys} mode={focus.mode} /></div>
+                    <div className="space-y-1"><Label className="text-xs text-muted-foreground">Keys touched</Label><KeysTable keys={focus.keys} mode={focus.mode} />
+                      {!!focus.omitted?.keys && <p className="text-xs text-muted-foreground">… and {focus.omitted.keys} more</p>}</div>
                     <div className="space-y-1"><Label className="text-xs text-muted-foreground">Commands sent</Label><Commands r={focus} /></div>
                   </>
                 ) : <p className="text-xs text-muted-foreground">Nothing yet.</p>}
@@ -232,7 +256,7 @@ export function ShowcaseShell({ initialStatus }: { initialStatus: StatusResponse
                     <Badge variant={s.failoverReady ? 'secondary' : 'destructive'}>{s.failoverReady ? 'failover ready' : 'not failover ready'}</Badge>
                   )}
                   <div><InsightLink mode={focus?.mode ?? mode} /></div>
-                  <CliSnippet mode={focus?.mode ?? mode} />
+                  <CliSnippet mode={focus?.mode ?? mode} keys={focus?.keys} master={s.master} />
                 </div>
               </div>
             </ScrollArea>

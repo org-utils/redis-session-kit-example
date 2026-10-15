@@ -1,6 +1,8 @@
 // Mock backend: in-memory stand-ins for the Fastify API's operation results until each section's real routes exist.
-// Everything here is fake; replace with calls to /api/:mode/.... (Status and the event log are live: see live.ts.)
+// Everything here is fake; replace with calls to /api/:mode/.... (Status and the event log are live: see live.ts; the
+// cache section runs for real: see api.ts.)
 import type { Mode } from '@showcase/contracts';
+import type { KeyTouched, RunResult } from './api';
 import type { Values } from './examples';
 import type { ModeView } from './live';
 import {
@@ -11,6 +13,8 @@ export type ModuleKind = 'feature' | 'mode-specific';
 export interface Op { id: string; label: string }
 export interface ShowcaseModule {
   id: string; label: string; kind: ModuleKind; onlyMode?: Mode; blurb: string; ops: Op[];
+  /** Runs against the real backend (api.ts) rather than the stand-ins below; Reset section deletes `<namespace>:*`. */
+  live?: { namespace: string };
 }
 
 export const MODULES: ShowcaseModule[] = [
@@ -22,12 +26,8 @@ export const MODULES: ShowcaseModule[] = [
     ] },
   { id: 'session', label: 'Session', kind: 'feature', blurb: 'Opaque credentials, rotation chains, replay, revoke, expiry.',
     ops: ['create', 'validate', 'get', 'touch', 'update', 'rotate', 'revoke', 'destroy', 'setSecurityVersion', 'revokeAll', 'list'].map((id) => ({ id, label: id })) },
-  { id: 'cache', label: 'Cache', kind: 'feature', blurb: 'JSON values with TTL and conditional writes.',
-    ops: [
-      { id: 'set', label: 'set' },
-      { id: 'get', label: 'get' },
-      { id: 'clear', label: 'clear' },
-    ] },
+  { id: 'cache', label: 'Cache', kind: 'feature', live: { namespace: 'showcase:cache' }, blurb: 'JSON values with TTL and conditional writes.',
+    ops: ['set', 'get', 'has', 'ttl', 'setIfAbsent', 'delete', 'clear'].map((id) => ({ id, label: id })) },
   { id: 'lock', label: 'Lock', kind: 'feature', blurb: 'Ownership-token leases.',
     ops: [
       { id: 'acquire', label: 'acquire' },
@@ -81,17 +81,10 @@ export function nodeOf(slot: number): string {
   return slot <= 5460 ? '127.0.0.1:7001' : slot <= 10922 ? '127.0.0.1:7002' : '127.0.0.1:7003';
 }
 
-export interface KeyTouched { key: string; type: string; ttl: number | null; slot?: number; node?: string }
-export interface RunResult {
-  id: number; at: string; mode: Mode; module: string; op: string; input: string;
-  httpStatus: number; latencyMs: number; body: unknown; keys: KeyTouched[]; commands: string[];
-}
-
 let runId = 0;
 const err = (code: string, name: string, message: string, mode: Mode) => ({ error: { code, name, message, mode } });
 
 export function runOp(mode: Mode, moduleId: string, opId: string, v: Values, status: ModeView): RunResult {
-  const ns = `showcase:${moduleId === 'pubsub' ? 'events' : moduleId === 'streams' ? 'stream' : moduleId}`;
   const input = Object.values(v).map(String).join(' · ');
   const base = { id: ++runId, at: new Date().toLocaleTimeString(), mode, module: moduleId, op: opId, input,
     latencyMs: +((status.latencyMs ?? 1) * (1 + Math.random())).toFixed(2) };
@@ -139,24 +132,10 @@ export function runOp(mode: Mode, moduleId: string, opId: string, v: Values, sta
       const lim = Number(v.limit);
       return ok({ affected: Math.min(lim, 2), remaining: Math.max(0, 2 - lim) }, [], ['ZRANGE …', 'EVALSHA revoke.lua …']);
     }
-    case 'cache.set': {
-      const exists = String(v.key) === 'user:42';
-      const written = v.condition === 'nx' ? !exists : v.condition === 'xx' ? exists : true;
-      return ok(written, written ? [k(`${ns}:${v.key}`, 'string', Number(v.ttl))] : [],
-        [`SET ${ns}:${v.key} ${json(v.value)} EX ${v.ttl}${v.condition !== 'none' ? ` ${String(v.condition).toUpperCase()}` : ''}`]);
-    }
-    case 'cache.get':
-      return String(v.key) === 'user:42'
-        ? ok({ hit: true, value: { id: '42', name: 'Ada' } }, [k(`${ns}:${v.key}`, 'string', 287)], [`GET ${ns}:${v.key}`])
-        : ok({ hit: false }, [], [`GET ${ns}:${v.key}`]);
-    case 'cache.clear':
-      return ok(3, [], mode === 'cluster' ? ['SCAN on 7001', 'SCAN on 7002', 'SCAN on 7003', 'DEL (grouped by slot)'] : [`SCAN 0 MATCH ${ns}:${v.pattern} COUNT 100`, 'DEL …']);
     default:
       return ok({ ok: true, note: 'stubbed' }, [], [`(${moduleId}.${opId})`]);
   }
 }
-
-function json(s: unknown) { try { return JSON.stringify(JSON.parse(String(s))); } catch { return String(s); } }
 
 export const modeText: Record<Mode, string> = {
   standalone: 'text-mode-standalone', sentinel: 'text-mode-sentinel', cluster: 'text-mode-cluster',
