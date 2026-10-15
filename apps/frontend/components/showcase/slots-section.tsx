@@ -61,7 +61,8 @@ function RunResultCard({ r }: { r: RunResult }) {
       <CardContent className="space-y-2">
         <div className="text-xs text-muted-foreground">Sent, and to which node:</div>
         <Commands r={r} />
-        {r.keys.length > 0 && <><div className="text-xs text-muted-foreground">The keys, by slot and node:</div><KeysTable keys={r.keys} mode="cluster" /></>}
+        {/* A refused command (CROSSSLOT) went to one node for every key: only a run that worked shows each slot's owner. */}
+        {r.httpStatus < 300 && r.keys.length > 0 && <><div className="text-xs text-muted-foreground">The keys, by slot and node:</div><KeysTable keys={r.keys} mode="cluster" /></>}
         <Json value={r.body} />
       </CardContent>
     </Card>
