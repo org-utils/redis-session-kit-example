@@ -6,7 +6,7 @@ import type { Config } from './config/index.ts';
 import { ModeUnavailableError, registerErrorHandling } from './http/errors.ts';
 import { eventRoutes } from './http/events.ts';
 import { statusRoutes } from './http/status.ts';
-import { createEventLog } from './redis/event-log.ts';
+import { createEventLog, type NewEntry } from './redis/event-log.ts';
 import { createModeChecks } from './redis/mode-checks.ts';
 import { closeModeClients, connectionConfig, createModeClients } from './redis/mode-clients.ts';
 import { startTrace, type TraceRecording } from './redis/redis-trace.ts';
@@ -14,13 +14,20 @@ import { createStatusMonitor } from './redis/status-monitor.ts';
 import { createTemporaryClients, type TemporaryClients } from './redis/temporary-clients.ts';
 import { cacheModule } from './modules/cache/plugin.ts';
 import { clientModule } from './modules/client/plugin.ts';
+import { lockModule } from './modules/lock/plugin.ts';
 
 /**
  * A feature module: registered once per mode under `/api/<mode>/<name>`, given that mode's client (and a factory for
- * temporary clients on the same connection), and never told which mode it is on. Its routes return the package's result
- * as is; the mode scope sends it as `{ result, redis }`.
+ * temporary clients on the same connection) and its event log, and never told which mode it is on. Its POST routes
+ * return the package's result as is; the mode scope sends it as `{ result, redis }`. Its GET routes are live views (a
+ * lease, an SSE stream): untraced, sent as they are.
  */
-export type FeatureModule = FastifyPluginAsyncZod<{ client: RedisClient; temporaryClients: TemporaryClients }>;
+export type FeatureModule = FastifyPluginAsyncZod<{ client: RedisClient; temporaryClients: TemporaryClients; events: ModeEvents }>;
+
+/** One mode's event log, for what a feature module notices in the background. */
+export interface ModeEvents {
+  append(entry: NewEntry): void;
+}
 
 declare module 'fastify' {
   interface FastifyRequest {
@@ -30,7 +37,7 @@ declare module 'fastify' {
 }
 
 /** The feature modules by name, which is also their path segment. */
-export const FEATURE_MODULES: Record<string, FeatureModule> = { client: clientModule, cache: cacheModule };
+export const FEATURE_MODULES: Record<string, FeatureModule> = { client: clientModule, cache: cacheModule, lock: lockModule };
 
 export interface AppOptions {
   config: Config;
@@ -80,9 +87,10 @@ export async function buildApp({ config, logger = false, modules = FEATURE_MODUL
           request.mode = mode;
           if (!monitor.isAvailable(mode)) throw new ModeUnavailableError(mode);
         });
-        // Every command the handler sends is recorded; the response carries that trace as `redis`, beside the package's
-        // result (`{ result, redis }`) or the error (`{ error, redis }`).
+        // Every command an operation (a POST) sends is recorded; the response carries that trace as `redis`, beside the
+        // package's result (`{ result, redis }`) or the error (`{ error, redis }`).
         scope.addHook('preHandler', (request, _reply, done) => {
+          if (request.method !== 'POST') return done();
           request.redisTrace = startTrace();
           request.redisTrace.run(done);
         });
@@ -95,7 +103,10 @@ export async function buildApp({ config, logger = false, modules = FEATURE_MODUL
           reply.type('application/json; charset=utf-8');
           return JSON.stringify({ result, redis });
         });
-        for (const [name, module] of Object.entries(modules)) await scope.register(module, { client, temporaryClients, prefix: `/${name}` });
+        const events: ModeEvents = { append: (entry) => eventLog.append(mode, entry) };
+        for (const [name, module] of Object.entries(modules)) {
+          await scope.register(module, { client, temporaryClients, events, prefix: `/${name}` });
+        }
       },
       { prefix: `/api/${mode}` },
     );

@@ -8,7 +8,7 @@ import { Table, TableBody, TableCell, TableRow } from '@/components/ui/table';
 import { cn } from '@/lib/utils';
 import type { Values } from '@/lib/showcase/examples';
 import type { Mode } from '@showcase/contracts';
-import { useStreamSim } from '@/lib/showcase/mock-live';
+import { useStreamSim, simulated } from '@/lib/showcase/mock-live';
 import { OpForm } from './op-form';
 
 const parse = (s: unknown) => { try { return JSON.parse(String(s)); } catch { return {}; } };
@@ -18,13 +18,14 @@ export function StreamsSection({ mode }: { mode: Mode }) {
   const { entries, groups } = st;
   const pendingIds = new Set(Object.values(groups).flatMap((g) => Object.values(g.pending).flat()));
   const consumers = [...new Set(['worker-1', 'worker-2', ...Object.values(groups).flatMap((g) => Object.keys(g.pending))])];
-  const run = (op: string, v: Values) => {
+  const runSim = (op: string, v: Values): unknown => {
     if (op === 'createGroup') return st.createGroup(String(v.group), v.start as '$' | '0');
     if (op === 'add') return st.add(parse(v.fields));
     if (op === 'read') return st.readGroup(String(v.group), String(v.consumer), Number(v.count), v.pending === true);
     const ids = String(v.ids) === '$last' ? Object.values(st.read).flat().slice(-2) : String(v.ids).split(',').map((x) => x.trim());
     return st.ack(String(v.group), ids);
   };
+  const run = (op: string, v: Values) => simulated(mode, 'streams', op, runSim(op, v));
   const tokens = [
     { value: '$last', label: 'the last ids I read' },
     ...Object.entries(st.read).flatMap(([c, ids]) => ids.map((id) => ({ value: id, label: `${c} · ${id}` }))),

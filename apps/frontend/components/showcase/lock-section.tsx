@@ -1,58 +1,95 @@
-// The lock section: one lease with a live TTL bar and two holder lanes (A and B) on top, the operation form below.
+// The lock section: one lease with a live TTL bar and two holder lanes (A and B) on top, the operation form below. The
+// bar and the holds badges come from Redis (the key's token and PTTL); each lane keeps the tokens it was handed.
 'use client';
 
 import { Lock } from 'lucide-react';
+import { useRef, useState } from 'react';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { cn } from '@/lib/utils';
-import type { Values } from '@/lib/showcase/examples';
-import type { Mode } from '@showcase/contracts';
-import { useLockSim, type Lane } from '@/lib/showcase/mock-live';
+import { runOperation, type RunResult } from '@/lib/showcase/api';
+import { spec, type Values } from '@/lib/showcase/examples';
+import { useLease } from '@/lib/showcase/use-lease';
+import { MODES, type Mode } from '@showcase/contracts';
 import { OpForm } from './op-form';
 
+type Lane = 'A' | 'B';
 const LANES: Lane[] = ['A', 'B'];
-const secs = (ms: number) => `${Math.max(0, ms / 1000).toFixed(1)}s`;
+const TOKENS_KEPT = 5;
+const short = (token: string) => `${token.slice(0, 8)}…`;
+const perMode = <T,>(make: () => T) => Object.fromEntries(MODES.map((m) => [m, make()])) as Record<Mode, T>;
 
-export function LockSection({ mode }: { mode: Mode }) {
-  const lock = useLockSim();
-  const { lease, now } = lock;
-  const left = lease ? lease.expiresAt - now : 0;
-  const tokenOf = (v: string) => (v === '$A' ? lock.tokens.A[0] ?? '' : v === '$B' ? lock.tokens.B[0] ?? '' : v);
-  const run = (op: string, v: Values) => {
-    const lane = v.lane as Lane;
-    if (op === 'acquire') return lock.acquire(lane, String(v.name), Number(v.ttl)).body;
-    if (op === 'extend') return lock.extend(lane, tokenOf(String(v.token)), Number(v.ttl)).body;
-    if (op === 'release') return lock.release(lane, tokenOf(String(v.token))).body;
-    return lock.using(lane, 'report:nightly', Number(v.work), Number(v.ttl)).body;
+export function LockSection({ mode, onResult }: { mode: Mode; onResult: (r: RunResult) => void }) {
+  // The lease the pane watches: the name the last operation ran on.
+  const [name, setName] = useState('report:nightly');
+  const lease = useLease(mode, name);
+  // Tokens this browser was handed, per mode and lane, newest first; and each lane's `using` still running.
+  const [tokens, setTokens] = useState(() => perMode<Record<Lane, string[]>>(() => ({ A: [], B: [] })));
+  const [working, setWorking] = useState(() => perMode<Record<Lane, number>>(() => ({ A: 0, B: 0 })));
+  const lanes = tokens[mode];
+
+  const held = lease?.token ?? null;
+  // A `using` lane learns its token only when the work ends: until then, a lease no lane knows is that lane's.
+  const holder = LANES.find((l) => held && lanes[l].includes(held))
+    ?? (held ? LANES.find((l) => working[mode][l] > 0) : undefined);
+
+  // The bar's full width: the longest TTL seen for the current token (an extend can lengthen it).
+  const full = useRef<{ token: string | null; ms: number }>({ token: null, ms: 0 });
+  if (lease?.token !== full.current.token) full.current = { token: lease?.token ?? null, ms: 0 };
+  full.current.ms = Math.max(full.current.ms, lease?.ttlMs ?? 0);
+  const left = lease?.ttlMs ?? 0;
+
+  const tokenOf = (v: string) => (v === '$A' ? lanes.A[0] ?? '' : v === '$B' ? lanes.B[0] ?? '' : v);
+  const keep = (lane: Lane, token: unknown) => {
+    if (typeof token !== 'string') return;
+    setTokens((t) => ({ ...t, [mode]: { ...t[mode], [lane]: [token, ...t[mode][lane].filter((x) => x !== token)].slice(0, TOKENS_KEPT) } }));
   };
-  const tokens = [
-    { value: '$A', label: `A's last token${lock.tokens.A[0] ? ` (${lock.tokens.A[0]})` : ' (none)'}` },
-    { value: '$B', label: `B's last token${lock.tokens.B[0] ? ` (${lock.tokens.B[0]})` : ' (none)'}` },
-    ...LANES.flatMap((l) => lock.tokens[l].slice(1).map((t) => ({ value: t, label: `${l} · ${t}` }))),
+  const run = async (op: string, v: Values) => {
+    const lane = v.lane as Lane;
+    const at = mode;
+    setName(String(v.name));
+    if (op === 'using') setWorking((w) => ({ ...w, [at]: { ...w[at], [lane]: w[at][lane] + 1 } }));
+    try {
+      const r = await runOperation(at, 'lock', op, () => spec('lock', op).body!({ ...v, token: tokenOf(String(v.token ?? '')) }));
+      if (r.httpStatus === 200) keep(lane, (r.body as { token?: unknown } | null)?.token);
+      return r;
+    } finally {
+      if (op === 'using') setWorking((w) => ({ ...w, [at]: { ...w[at], [lane]: w[at][lane] - 1 } }));
+    }
+  };
+  const options = [
+    { value: '$A', label: `A's last token${lanes.A[0] ? ` (${short(lanes.A[0])})` : ' (none)'}` },
+    { value: '$B', label: `B's last token${lanes.B[0] ? ` (${short(lanes.B[0])})` : ' (none)'}` },
+    ...LANES.flatMap((l) => lanes[l].slice(1).map((t) => ({ value: t, label: `${l} · ${short(t)}` }))),
   ];
   return (
     <div className="space-y-4">
       <Card size="sm">
         <CardHeader>
-          <CardTitle className="flex items-center gap-2 text-sm"><Lock className="size-4" /> showcase:lock:report:nightly</CardTitle>
-          <CardDescription>One lease, two holders. The bar is the key&apos;s remaining TTL.</CardDescription>
+          <CardTitle className="flex items-center gap-2 text-sm"><Lock className="size-4" /> {lease?.key ?? `showcase:lock:${name}`}</CardTitle>
+          <CardDescription>One lease, two holders. The bar is the key&apos;s remaining TTL and the holder its stored token, read from Redis (native GET + PTTL, not a package call).</CardDescription>
         </CardHeader>
         <CardContent className="space-y-3">
           <div className="h-3 overflow-hidden rounded-full bg-muted">
-            <div className={cn('h-full transition-[width] duration-100', lease ? 'bg-mode-standalone' : 'bg-transparent')} style={{ width: `${lease ? Math.min(100, (left / 30000) * 100) : 0}%` }} />
+            <div className={cn('h-full transition-[width] duration-200 ease-linear', held ? 'bg-mode-standalone' : 'bg-transparent')}
+              style={{ width: `${held && full.current.ms ? Math.min(100, (left / full.current.ms) * 100) : 0}%` }} />
           </div>
           <div className="font-mono text-xs text-muted-foreground">
-            {lease ? <>held by <span className="font-medium text-foreground">{lease.lane}</span> · {secs(left)} left · token {lease.token}{lease.using && lease.using > now && <> · working {secs(lease.using - now)}</>}</> : 'free'}
+            {!lease ? 'reading…' : held ? (
+              <>held by <span className="font-medium text-foreground">{holder ?? 'another client'}</span> · {(left / 1000).toFixed(1)}s left · token {short(held)}
+                {holder && working[mode][holder] > 0 && <> · working</>}</>
+            ) : 'free'}
           </div>
           <div className="grid grid-cols-2 gap-3">
             {LANES.map((lane) => {
-              const holds = lease?.lane === lane;
+              const holds = holder === lane;
               return (
                 <div key={lane} className={cn('space-y-2 rounded-lg border p-3', holds && 'border-success ring-1 ring-success')}>
                   <div className="flex items-center justify-between text-sm font-medium">Holder {lane} {holds ? <Badge className="bg-success text-success-foreground">holds</Badge> : <Badge variant="outline">waiting</Badge>}</div>
                   <ul className="space-y-0.5 font-mono text-[11px] text-muted-foreground">
-                    {lock.tokens[lane].map((t, i) => <li key={t} className={cn(i === 0 && 'text-foreground')}>{t}{lease?.token === t && ' ← lease'}</li>)}
-                    {!lock.tokens[lane].length && <li>no tokens yet</li>}
+                    {lanes[lane].map((t, i) => <li key={t} className={cn(i === 0 && 'text-foreground')}>{short(t)}{held === t && ' ← lease'}</li>)}
+                    {working[mode][lane] > 0 && <li className="text-warning">using() running…</li>}
+                    {!lanes[lane].length && !working[mode][lane] && <li>no tokens yet</li>}
                   </ul>
                 </div>
               );
@@ -60,7 +97,7 @@ export function LockSection({ mode }: { mode: Mode }) {
           </div>
         </CardContent>
       </Card>
-      <OpForm module="lock" ops={['acquire', 'extend', 'release', 'using']} mode={mode} tokens={tokens} onRun={run} />
+      <OpForm module="lock" ops={['acquire', 'extend', 'release', 'using']} mode={mode} tokens={options} onRun={run} onResult={onResult} />
     </div>
   );
 }

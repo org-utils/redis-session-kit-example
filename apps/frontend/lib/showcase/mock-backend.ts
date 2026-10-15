@@ -31,7 +31,7 @@ export const MODULES: ShowcaseModule[] = [
     ops: ['create', 'validate', 'get', 'touch', 'update', 'rotate', 'revoke', 'destroy', 'setSecurityVersion', 'revokeAll', 'list'].map((id) => ({ id, label: id })) },
   { id: 'cache', label: 'Cache', kind: 'feature', namespace: 'showcase:cache', blurb: 'JSON values with TTL and conditional writes.',
     ops: ['set', 'get', 'has', 'ttl', 'setIfAbsent', 'delete', 'clear'].map((id) => ({ id, label: id })) },
-  { id: 'lock', label: 'Lock', kind: 'feature', blurb: 'Ownership-token leases.',
+  { id: 'lock', label: 'Lock', kind: 'feature', namespace: 'showcase:lock', blurb: 'Ownership-token leases.',
     ops: [
       { id: 'acquire', label: 'acquire' },
       { id: 'extend', label: 'extend' },

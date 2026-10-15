@@ -192,7 +192,7 @@ export function ShowcaseShell({ initialStatus }: { initialStatus: StatusResponse
               ) : moduleId === 'slots' ? (
                 <SlotsSection />
               ) : moduleId === 'lock' ? (
-                <LockSection mode={mode} />
+                <LockSection mode={mode} onResult={(r) => setResults([r])} />
               ) : moduleId === 'rate-limit' ? (
                 <RateLimitSection mode={mode} />
               ) : moduleId === 'pubsub' ? (
@@ -279,7 +279,7 @@ export function ShowcaseShell({ initialStatus }: { initialStatus: StatusResponse
                 {events.map((e) => (
                   <li key={e.id} className="flex gap-3 py-0.5">
                     <span className="text-muted-foreground">{new Date(e.ts).toLocaleTimeString()}</span><ModeName mode={e.mode} className="w-20" />
-                    <span className={e.kind === 'error' ? 'text-destructive' : 'text-warning'}>
+                    <span className={e.kind === 'error' ? 'text-destructive' : e.kind === 'showcase' ? 'text-muted-foreground' : 'text-warning'}>
                       {e.source}{e.channel && ` · ${e.channel}`}: {e.message}
                     </span>
                   </li>

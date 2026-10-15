@@ -88,3 +88,6 @@ export function startTrace(): TraceRecording {
     },
   };
 }
+
+/** Runs `fn` with nothing it sends recorded: the showcase's own reads beside a traced operation. */
+export const untraced = <T>(fn: () => T): T => storage.exit(fn);

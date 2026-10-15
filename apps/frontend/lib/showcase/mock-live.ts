@@ -1,61 +1,25 @@
-// Mock modules for the lock, rate-limit, pub/sub and streams sections: in-memory stand-ins for their /api/:mode/...
+// Mock modules for the rate-limit, pub/sub and streams sections: in-memory stand-ins for their /api/:mode/...
 // routes and SSE streams until the real backend exists. Behaviour is simplified (e.g. a denied consume doesn't count).
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
 import type { Mode } from '@showcase/contracts';
+import type { RunResult } from './api';
+
+let simId = 0;
+/** A simulated operation's result as a RunResult, so mock sections share the real sections' form. Nothing was sent. */
+export function simulated(mode: Mode, module: string, op: string, body: unknown): Promise<RunResult> {
+  return Promise.resolve({
+    id: --simId, at: new Date().toLocaleTimeString(), mode, module, op, input: '', httpStatus: 200, latencyMs: 0,
+    body, keys: [], commands: ['(simulated: nothing sent)'],
+  });
+}
 
 const rnd = (n = 6) => Math.random().toString(36).slice(2, 2 + n);
 export function useNowMs(step = 100) {
   const [n, setN] = useState(() => Date.now());
   useEffect(() => { const t = setInterval(() => setN(Date.now()), step); return () => clearInterval(t); }, [step]);
   return n;
-}
-
-/* ───────────── lock: one lease key, two holder lanes ───────────── */
-export type Lane = 'A' | 'B';
-export interface LockResult { op: string; lane: Lane; body: unknown; call: string }
-export function useLockSim() {
-  const [lease, setLease] = useState<{ name: string; token: string; lane: Lane; expiresAt: number; using?: number } | null>(null);
-  const [tokens, setTokens] = useState<Record<Lane, string[]>>({ A: [], B: [] });
-  const [log, setLog] = useState<LockResult[]>([]);
-  const leaseRef = useRef(lease); leaseRef.current = lease;
-  const now = useNowMs();
-  const live = lease && lease.expiresAt > now ? lease : null;
-  const push = (r: LockResult) => { setLog((l) => [r, ...l].slice(0, 30)); return r; };
-  const current = () => { const l = leaseRef.current; return l && l.expiresAt > Date.now() ? l : null; };
-
-  const acquire = (lane: Lane, name: string, ttl: number): LockResult => {
-    if (ttl > 300) return push({ op: 'acquire', lane, call: `lock.acquire('${name}', ${ttl})`, body: { error: { code: 'LOCK_LIMIT', message: `ttl ${ttl}s exceeds maxTtl 300s` } } });
-    const token = `tk_${rnd()}`;
-    setTokens((t) => ({ ...t, [lane]: [token, ...t[lane]].slice(0, 5) }));
-    const held = current();
-    const acquired = !held;
-    if (acquired) setLease({ name, token, lane, expiresAt: Date.now() + ttl * 1000 });
-    return push({ op: 'acquire', lane, call: `lock.acquire('${name}', ${ttl})`, body: { acquired, token } });
-  };
-  const extend = (lane: Lane, token: string, ttl: number): LockResult => {
-    const held = current(), ok = !!held && held.token === token;
-    if (ok) setLease({ ...held!, expiresAt: Date.now() + ttl * 1000 });
-    return push({ op: 'extend', lane, call: `lock.extend(name, token, ${ttl})`, body: ok });
-  };
-  const release = (lane: Lane, token: string): LockResult => {
-    const held = current(), ok = !!held && held.token === token;
-    if (ok) setLease(null);
-    return push({ op: 'release', lane, call: 'lock.release(name, token)', body: ok });
-  };
-  const using = (lane: Lane, name: string, workS: number, ttl: number): LockResult => {
-    if (current()) return push({ op: 'using', lane, call: `lock.using('${name}', fn, ${ttl})`, body: { error: { code: 'LOCK_HELD', message: `lock ${name} is held` } } });
-    const token = `tk_${rnd()}`;
-    setLease({ name, token, lane, expiresAt: Date.now() + ttl * 1000, using: Date.now() + workS * 1000 });
-    setTimeout(() => {
-      const l = leaseRef.current;
-      if (l && l.token === token && l.expiresAt > Date.now()) setLease(null);
-      else push({ op: 'using', lane, call: 'onError(lock-release)', body: { onError: 'lock-release', message: `release of ${name} failed: lease expired mid-work` } });
-    }, workS * 1000);
-    return push({ op: 'using', lane, call: `lock.using('${name}', async () => work(${workS}s), ${ttl})`, body: { started: true, holdsFor: `${workS}s` } });
-  };
-  return { lease: live, now, tokens, log, acquire, extend, release, using };
 }
 
 /* ───────────── rate limit: 10 per 20 s ───────────── */

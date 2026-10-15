@@ -6,7 +6,7 @@ import { buildApp, type FeatureModule } from '../app.ts';
 import { testConfig } from '../test-config.ts';
 
 const ping: FeatureModule = async (app, { client }) => {
-  app.get('/ping', async () => ({ pong: await client.ping() }));
+  app.post('/ping', async () => ({ pong: await client.ping() }));
 };
 
 const app = await buildApp({
@@ -17,7 +17,7 @@ before(() => app.ready());
 after(() => app.close());
 
 test('a mode that has never been healthy answers 503 MODE_UNAVAILABLE without reaching the module', async () => {
-  const res = await app.inject('/api/standalone/probe/ping');
+  const res = await app.inject({ method: 'POST', url: '/api/standalone/probe/ping' });
   assert.equal(res.statusCode, 503);
   const { error } = res.json();
   assert.deepEqual([error.code, error.name, error.mode], ['MODE_UNAVAILABLE', 'ModeUnavailableError', 'standalone']);
@@ -25,13 +25,13 @@ test('a mode that has never been healthy answers 503 MODE_UNAVAILABLE without re
 });
 
 test('an available mode reaches the module with its mode client', async () => {
-  const res = await app.inject('/api/cluster/probe/ping');
+  const res = await app.inject({ method: 'POST', url: '/api/cluster/probe/ping' });
   assert.equal(res.statusCode, 200);
   assert.deepEqual(res.json().result, { pong: 'PONG' });
 });
 
 test('a mode left out of SHOWCASE_MODES has no routes', async () => {
-  const res = await app.inject('/api/sentinel/probe/ping');
+  const res = await app.inject({ method: 'POST', url: '/api/sentinel/probe/ping' });
   assert.equal(res.statusCode, 404);
   assert.equal(res.json().error.code, 'NOT_FOUND');
 });
