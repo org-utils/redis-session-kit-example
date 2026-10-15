@@ -15,7 +15,7 @@ import { setTimeout as sleep } from 'node:timers/promises';
 import type { PubSubMessage, RedisClientConfig } from 'ioredis-toolkit';
 import type { FeatureModule } from '../../app.ts';
 import { MODE_CLIENT_MODULES } from '../../redis/mode-clients.ts';
-import { createTranscript } from './transcript.ts';
+import { createTranscript, literal } from './transcript.ts';
 
 /** The shutdown demo's Pub/Sub namespace. */
 const SHUTDOWN_EVENTS = 'showcase:client:events';
@@ -58,7 +58,7 @@ export const clientModule: FeatureModule = async (app, { client, temporaryClient
           });
         }
         await step(`redis.config.${section}`, () => ({ ...redis.config[section] }));
-        const call = `redis.${method}(${JSON.stringify(options)}${replace ? ", 'replace'" : ''})`;
+        const call = `redis.${method}(${literal(options)}${replace ? ", 'replace'" : ''})`;
         // Each section's options are checked by the package; the cast only names the method.
         const overridden = await step(call, () => void redis[method](options as never, replace ? 'replace' : 'merge'));
         await step(`redis.config.${section}`, () => ({ ...redis.config[section] }));
@@ -94,7 +94,9 @@ export const clientModule: FeatureModule = async (app, { client, temporaryClient
         if (reading) {
           await step("redis.streams.read('orders', { id: '$', blockMs: 0 })", () => reading);
           const channel = `${SHUTDOWN_EVENTS}:orders.created`;
-          await step(`modeClient.publish('${channel}', '{"orderId":"43"}')`, () => client.publish(channel, '{"orderId":"43"}'));
+          await step(`modeClient.publish('${channel}', JSON.stringify({ orderId: '43' }))`, () =>
+            client.publish(channel, JSON.stringify({ orderId: '43' })),
+          );
           await sleep(DELIVERY_MS);
           await step('messages the handler received', () => received);
           await step("redis.pubsub.subscribe('orders.created', handler)", subscribe);

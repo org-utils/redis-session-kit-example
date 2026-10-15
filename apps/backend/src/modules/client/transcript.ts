@@ -12,6 +12,17 @@ export interface Transcript {
 }
 
 /** An empty transcript, for one request. */
+/** A JSON value as it would be written in code, for a step's call: `{ defaultTtl: 5 }`, `'replace'`. */
+export function literal(value: unknown): string {
+  if (typeof value === 'string') return `'${value.replaceAll('\\', '\\\\').replaceAll("'", "\\'")}'`;
+  if (Array.isArray(value)) return `[${value.map(literal).join(', ')}]`;
+  if (value && typeof value === 'object') {
+    const entries = Object.entries(value).map(([key, v]) => `${/^[A-Za-z_$][\w$]*$/.test(key) ? key : literal(key)}: ${literal(v)}`);
+    return entries.length ? `{ ${entries.join(', ')} }` : '{}';
+  }
+  return JSON.stringify(value);
+}
+
 export function createTranscript(): Transcript {
   const steps: ClientStep[] = [];
   return {

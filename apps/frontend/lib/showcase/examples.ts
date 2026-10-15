@@ -140,7 +140,7 @@ export const OPS: Record<string, OpSpec> = {
     call: (v) => [
       v.liveWork && "await redis.pubsub.subscribe('orders.created', handler)\nawait redis.pubsub.publish('orders.created', { orderId: '42' })\nconst read = redis.streams.read('orders', { id: '$', blockMs: 0 })",
       'await redis.close()',
-      v.liveWork && "await read\nawait modeClient.publish('showcase:client:events:orders.created', '{\"orderId\":\"43\"}')  // does the handler still hear it?\nawait redis.pubsub.subscribe('orders.created', handler)",
+      v.liveWork && "await read\nawait modeClient.publish('showcase:client:events:orders.created', JSON.stringify({ orderId: '43' }))  // does the handler still hear it?\nawait redis.pubsub.subscribe('orders.created', handler)",
       v.closeTwice && 'await redis.close()',
     ].filter(Boolean).join('\n'),
     body: (v) => ({ liveWork: v.liveWork === true, closeTwice: v.closeTwice === true }),

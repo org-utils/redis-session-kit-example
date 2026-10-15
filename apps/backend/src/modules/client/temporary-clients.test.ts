@@ -90,7 +90,7 @@ for (const mode of MODES) {
       test('merge: withCache({ defaultTtl: 5 }), then a set without a ttl gets 5 s', async () => {
         const { steps: [before, override, after, set, ttl], redis } = await steps({ method: 'withCache', options: { defaultTtl: 5 } });
         assert.deepEqual([before.call, before.value?.defaultTtl], ['redis.config.cache', 300]);
-        assert.deepEqual([override.call, override.ok], ['redis.withCache({"defaultTtl":5})', true]);
+        assert.deepEqual([override.call, override.ok], ['redis.withCache({ defaultTtl: 5 })', true]);
         assert.deepEqual([after.value?.defaultTtl, after.value?.namespace, after.value?.enabled], [5, 'showcase:cache', true]);
         assert.deepEqual([set.call, set.ok], ["redis.cache.set('with-demo', 'merged')", true]);
         assert.deepEqual([ttl.call, ttl.value], ["redis.cache.ttl('with-demo')", 5]);
@@ -99,7 +99,7 @@ for (const mode of MODES) {
 
       test("replace: the omitted fields reset, so enabled is false and cache throws", async () => {
         const { steps: [, override, after, set, ...rest] } = await steps({ method: 'withCache', options: { defaultTtl: 5 }, replace: true });
-        assert.deepEqual([override.call, override.ok], ['redis.withCache({"defaultTtl":5}, \'replace\')', true]);
+        assert.deepEqual([override.call, override.ok], ["redis.withCache({ defaultTtl: 5 }, 'replace')", true]);
         assert.deepEqual([after.value?.enabled, after.value?.defaultTtl], [false, 5]);
         assert.deepEqual([set.ok, set.error?.code, set.error?.message], [false, 'REDIS_CONFIGURATION', 'Cache module is disabled']);
         assert.deepEqual(rest, []);
@@ -142,7 +142,7 @@ for (const mode of MODES) {
           ["redis.pubsub.publish('orders.created', { orderId: '42' })", count(1)],
           ['redis.close()', 'ok'],
           ["redis.streams.read('orders', { id: '$', blockMs: 0 })", 'Connection is closed.'],
-          ["modeClient.publish('showcase:client:events:orders.created', '{\"orderId\":\"43\"}')", count(0)],
+          ["modeClient.publish('showcase:client:events:orders.created', JSON.stringify({ orderId: '43' }))", count(0)],
           ['messages the handler received', [{ channel: 'orders.created', value: { orderId: '42' } }]],
           // The same text on every mode, cluster included (the package rejects it itself since 1.0.6).
           ["redis.pubsub.subscribe('orders.created', handler)", 'Connection is closed.'],
@@ -150,6 +150,8 @@ for (const mode of MODES) {
         // The read was waiting in Redis when the client closed.
         const { args } = redis.commands.find((c: { name: string }) => c.name === 'xread');
         assert.equal(args[args.indexOf('BLOCK') + 1], '0');
+        // The subscribe after close never reached Redis, so the trace lists only the first.
+        assert.equal(redis.commands.filter((c: { name: string }) => c.name === 'subscribe').length, 1);
       });
 
       test('close twice: the second close resolves too', async () => {
