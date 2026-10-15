@@ -1,0 +1,10 @@
+# Added to infra/sentinel.compose.yml: RedisInsight starts with the sentinel-monitored master already connected.
+# A sentinel database can only be pre-set through a JSON file, not env vars. The path is relative to infra/,
+# the folder of the first compose file.
+services:
+  redisinsight:
+    environment:
+      RI_ACCEPT_TERMS_AND_CONDITIONS: "true"
+      RI_PRE_SETUP_DATABASES_PATH: /showcase/databases.json
+    volumes:
+      - ./insight/sentinel.databases.json:/showcase/databases.json:ro

@@ -1,8 +1,27 @@
 {
   "name": "ioredis-toolkit-showcase",
   "private": true,
+  "license": "MIT",
   "packageManager": "pnpm@11.5.1",
+  "engines": {
+    "node": ">=24"
+  },
   "scripts": {
-    "dev": "pnpm --filter frontend dev"
+    "dev": "pnpm --filter frontend dev",
+    "infra:up": "node scripts/compose.mjs all up -d --wait",
+    "infra:stop": "node scripts/compose.mjs all stop",
+    "infra:down": "node scripts/compose.mjs all down -v",
+    "infra:up:standalone": "node scripts/compose.mjs standalone up -d --wait",
+    "infra:stop:standalone": "node scripts/compose.mjs standalone stop",
+    "infra:down:standalone": "node scripts/compose.mjs standalone down -v",
+    "infra:up:sentinel": "node scripts/compose.mjs sentinel up -d --wait",
+    "infra:stop:sentinel": "node scripts/compose.mjs sentinel stop",
+    "infra:down:sentinel": "node scripts/compose.mjs sentinel down -v",
+    "infra:up:cluster": "node scripts/compose.mjs cluster up -d --wait",
+    "infra:stop:cluster": "node scripts/compose.mjs cluster stop",
+    "infra:down:cluster": "node scripts/compose.mjs cluster down -v",
+    "redis:standalone": "node scripts/compose.mjs standalone run --rm redis-cli",
+    "redis:sentinel": "node scripts/compose.mjs sentinel run --rm redis-cli",
+    "redis:cluster": "node scripts/compose.mjs cluster run --rm redis-cli"
   }
 }

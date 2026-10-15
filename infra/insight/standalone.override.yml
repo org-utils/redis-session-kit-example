@@ -1,0 +1,8 @@
+# Added to infra/standalone.compose.yml: RedisInsight starts with the standalone server already connected.
+services:
+  redisinsight:
+    environment:
+      RI_ACCEPT_TERMS_AND_CONDITIONS: "true"
+      RI_REDIS_HOST: 127.0.0.1
+      RI_REDIS_PORT: "6379"
+      RI_REDIS_ALIAS: showcase standalone

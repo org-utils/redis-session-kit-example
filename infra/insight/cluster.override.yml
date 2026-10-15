@@ -1,0 +1,9 @@
+# Added to infra/cluster.compose.yml: RedisInsight starts with the cluster already connected.
+# One seed node is enough; RedisInsight discovers the other nodes on first connect.
+services:
+  redisinsight:
+    environment:
+      RI_ACCEPT_TERMS_AND_CONDITIONS: "true"
+      RI_REDIS_HOST: 127.0.0.1
+      RI_REDIS_PORT: "7001"
+      RI_REDIS_ALIAS: showcase cluster

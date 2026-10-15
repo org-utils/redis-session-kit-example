@@ -1,0 +1,9 @@
+[
+  {
+    "id": "showcase-sentinel",
+    "name": "showcase sentinel",
+    "host": "127.0.0.1",
+    "port": 26379,
+    "sentinelMaster": { "name": "mymaster" }
+  }
+]
