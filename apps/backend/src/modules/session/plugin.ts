@@ -54,10 +54,15 @@ export const sessionModule: FeatureModule = async (app, { client, sessionMetrics
     readStored(client, recordKey(client.config.sessions.namespace, query.userId, query.id)),
   );
   // The cookie this request arrived with: HttpOnly, so the page asks the backend what the browser holds.
-  app.get('/cookie', ({ headers }): SessionCookie => ({ name: cookieName, value: readCookie(headers.cookie, cookieName) }));
+  app.get('/cookie', ({ headers }): SessionCookie => ({
+    name: cookieName,
+    value: readCookie(headers.cookie, cookieName),
+  }));
   // What the package reported to this mode's metrics sink, live.
   app.get('/metrics', () => sessionMetrics.snapshot());
-  app.post('/validate', { schema: { body: SessionTokenRequestSchema } }, (request) => sessions.validate(presented(request)));
+  app.post('/validate', { schema: { body: SessionTokenRequestSchema } }, (request) =>
+    sessions.validate(presented(request)),
+  );
   app.post('/get', { schema: { body: SessionTokenRequestSchema } }, (request) => sessions.get(presented(request)));
   // touch() returns nothing, and whether it wrote shows only in the trace; null stands for its undefined.
   app.post('/touch', { schema: { body: SessionTokenRequestSchema } }, async (request) => {

@@ -54,7 +54,10 @@ export const SESSION_KEY_VERSION = 'v1';
 /** The package only defines the KeyManager interface; the showcase's serves SESSION_ENCRYPTION_KEY as version v1. */
 export function sessionKeyManager(config: Config): KeyManager {
   const key = Buffer.from(config.SESSION_ENCRYPTION_KEY, 'base64');
-  return { current: () => ({ version: SESSION_KEY_VERSION, key }), get: (version) => (version === SESSION_KEY_VERSION ? key : undefined) };
+  return {
+    current: () => ({ version: SESSION_KEY_VERSION, key }),
+    get: (version) => (version === SESSION_KEY_VERSION ? key : undefined),
+  };
 }
 
 /**
@@ -74,7 +77,9 @@ export function sessionSettings(mode: Mode, config: Config) {
     storeUserAgent: true,
     storeDeviceId: true,
     encryption: { enabled: true },
-    cookie: { name: `showcase_session_${mode}`, httpOnly: true, secure: config.COOKIE_SECURE, sameSite: 'lax' as const, path: '/' },
+    cookie: {
+      name: `showcase_session_${mode}`, httpOnly: true, secure: config.COOKIE_SECURE, sameSite: 'lax' as const, path: '/',
+    },
   };
 }
 

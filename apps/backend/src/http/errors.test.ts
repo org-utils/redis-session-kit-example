@@ -4,7 +4,7 @@ import { after, before, test } from 'node:test';
 import { ErrorBodySchema } from '@showcase/contracts';
 import {
   CacheError, LockError, RateLimitError, RedisConfigurationError, SessionConflictError, SessionExpiredError, SessionInvalidError,
-  SessionLimitError, SessionNotFoundError,
+  SessionLimitError, SessionNotFoundError, SessionReplayError, SessionRevokedError,
 } from 'ioredis-toolkit';
 import { z } from 'zod';
 import { buildApp, type FeatureModule } from '../app.ts';
@@ -16,6 +16,8 @@ const thrown: Record<string, () => Error> = {
   'session-conflict': () => new SessionConflictError(),
   'session-expired': () => new SessionExpiredError(),
   'session-invalid': () => new SessionInvalidError(),
+  'session-revoked': () => new SessionRevokedError(),
+  'session-replay': () => new SessionReplayError(),
   'lock-held': () => new LockError('LOCK_HELD', 'lock job:1 is held'),
   'session-limit': () => new SessionLimitError('metadata exceeds maxMetadataBytes'),
   'rate-limit-configuration': () => new RateLimitError('RATE_LIMIT_CONFIGURATION', 'limit must be positive'),
@@ -47,6 +49,8 @@ const cases: [kind: string, status: number, code: string][] = [
   ['session-conflict', 409, 'SESSION_CONFLICT'],
   ['session-expired', 401, 'SESSION_EXPIRED'],
   ['session-invalid', 400, 'SESSION_INVALID'],
+  ['session-revoked', 401, 'SESSION_REVOKED'],
+  ['session-replay', 401, 'SESSION_REPLAY'],
   ['lock-held', 409, 'LOCK_HELD'],
   ['session-limit', 413, 'SESSION_LIMIT'],
   ['rate-limit-configuration', 500, 'RATE_LIMIT_CONFIGURATION'],

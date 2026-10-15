@@ -11,7 +11,7 @@ import { runOperation, type RunResult } from '@/lib/showcase/api';
 import { spec, type Values } from '@/lib/showcase/examples';
 import { perMode, useOnReset } from '@/lib/showcase/per-mode';
 import { usePolled } from '@/lib/showcase/use-polled';
-import { SessionCookieSchema, SessionStoredSchema, type Mode } from '@showcase/contracts';
+import { SessionCookieSchema, SessionStoredSchema, type Mode, type SessionCookie } from '@showcase/contracts';
 import { OpForm } from './op-form';
 import { Json } from './result-display';
 
@@ -41,7 +41,7 @@ function pretty(value: string): string {
   }
 }
 
-function BrowserCard({ mode, cookie, setCookie }: { mode: Mode; cookie: string | null | undefined; setCookie: string | null }) {
+function BrowserCard({ mode, cookie, setCookie }: { mode: Mode; cookie: SessionCookie | null; setCookie: string | null }) {
   return (
     <Card size="sm">
       <CardHeader>
@@ -50,9 +50,9 @@ function BrowserCard({ mode, cookie, setCookie }: { mode: Mode; cookie: string |
       </CardHeader>
       <CardContent className="space-y-3">
         <div className="space-y-1">
-          <div className="text-xs text-muted-foreground">Cookie <span className="font-mono">showcase_session_{mode}</span></div>
+          <div className="text-xs text-muted-foreground">Cookie <span className="font-mono">{cookie?.name ?? '…'}</span></div>
           <code className="block break-all rounded-md bg-code p-2 font-mono text-xs text-code-foreground">
-            {cookie === undefined ? 'reading…' : cookie ?? '(not set)'}
+            {!cookie ? 'reading…' : cookie.value ?? '(not set)'}
           </code>
         </div>
         <div className="space-y-1">
@@ -80,7 +80,10 @@ function StoredCard({ mode, known, refresh }: { mode: Mode; known: Known & { ses
       </CardHeader>
       <CardContent className="grid grid-cols-1 gap-4 @3xl:grid-cols-2">
         <div className="min-w-0 space-y-1">
-          <div className="text-xs text-muted-foreground">Decrypted, as <span className="font-mono">sessions.{from}()</span> returned it</div>
+          <div className="text-xs text-muted-foreground">
+            Decrypted, as <span className="font-mono">sessions.{from}()</span> returned it. A later touch rewrites the
+            record without returning it: run get to decrypt it again.
+          </div>
           <Json value={session} />
         </div>
         <div className="min-w-0 space-y-1">
@@ -126,7 +129,7 @@ export function SessionSection({ mode, resets, onResult }: { mode: Mode; resets:
     <div className="space-y-4">
       <div className="grid grid-cols-1 gap-4 @5xl:grid-cols-[minmax(0,1fr)_22rem]">
         <OpForm module="session" ops={OPS} mode={mode} tokens={tokens} onRun={run} onResult={onResult} />
-        <BrowserCard mode={mode} cookie={cookie === null ? undefined : cookie.value} setCookie={current.setCookie} />
+        <BrowserCard mode={mode} cookie={cookie} setCookie={current.setCookie} />
       </div>
       {current.session ? (
         <StoredCard mode={mode} known={{ ...current, session: current.session }} refresh={runs} />

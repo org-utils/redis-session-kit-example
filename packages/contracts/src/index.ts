@@ -363,10 +363,10 @@ export const SessionStoredSchema = z.object({
 export type SessionStored = z.infer<typeof SessionStoredSchema>;
 
 /** What the package reported to this mode's metrics sink since the backend started, one entry per name and labels. */
-export const SessionMetricsSchema = z.object({
+export const SessionMetricsSnapshotSchema = z.object({
   counters: z.array(z.object({ name: z.string(), labels: z.record(z.string(), z.string()), value: z.number() })),
 });
-export type SessionMetricsSnapshot = z.infer<typeof SessionMetricsSchema>;
+export type SessionMetricsSnapshot = z.infer<typeof SessionMetricsSnapshotSchema>;
 
 /* ───────────── errors: every non-2xx response ───────────── */
 
