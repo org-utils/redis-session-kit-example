@@ -6,6 +6,7 @@ import { Redis } from 'ioredis';
 import type { RedisClient } from 'ioredis-toolkit';
 import type { Config } from '../config/index.ts';
 import type { ModeClients } from './mode-clients.ts';
+import { PROBE_NAME, pairs, type Address } from './own-connections.ts';
 import type { ModeCheck } from './status-monitor.ts';
 
 const HEALTH_TIMEOUT_MS = 500;
@@ -16,22 +17,15 @@ export interface ModeChecks {
   close(): void;
 }
 
-type Address = { host: string; port: number };
-
 const message = (error: unknown) => (error instanceof Error ? error.message : String(error));
 
 /** A connection that never holds a command longer than the health check would: an unreachable node fails fast. */
 function probe({ host, port }: Address): Redis {
-  const redis = new Redis({ host, port, commandTimeout: HEALTH_TIMEOUT_MS, maxRetriesPerRequest: 0, retryStrategy: () => 1000 });
+  const redis = new Redis({
+    host, port, connectionName: PROBE_NAME, commandTimeout: HEALTH_TIMEOUT_MS, maxRetriesPerRequest: 0, retryStrategy: () => 1000,
+  });
   redis.on('error', () => {}); // an unreachable node shows in the status itself
   return redis;
-}
-
-/** `[k1, v1, k2, v2, …]` → `{ k1: v1, k2: v2, … }`, the shape of SENTINEL REPLICAS entries. */
-function pairs(flat: string[]): Record<string, string> {
-  const out: Record<string, string> = {};
-  for (let i = 0; i < flat.length; i += 2) out[flat[i]] = flat[i + 1];
-  return out;
 }
 
 async function sentinelStatus(sentinels: Redis[], addresses: Address[], name: string): Promise<SentinelStatus> {

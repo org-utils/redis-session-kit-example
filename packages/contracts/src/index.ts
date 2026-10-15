@@ -432,6 +432,53 @@ export const SessionMetricsSnapshotSchema = z.object({
 });
 export type SessionMetricsSnapshot = z.infer<typeof SessionMetricsSnapshotSchema>;
 
+/* ───────────── slots (cluster only): POST /api/cluster/slots/inspect, GET …/overview ───────────── */
+
+export const SlotRangeSchema = z.object({ start: z.number(), end: z.number() });
+
+/** Full Redis keys to place: each is asked of Redis with `CLUSTER KEYSLOT`. */
+export const SlotsInspectRequestSchema = z.object({ keys: z.array(z.string()).min(1).max(50) });
+export const SlotsInspectResultSchema = z.object({
+  /** Each key, in the order given, with its slot and the master that owns it. */
+  keys: z.array(z.object({ key: z.string(), slot: z.number(), node: z.string() })),
+  /** The keys by slot, in order of first appearance: what a cluster-aware call fans out into. */
+  groups: z.array(z.object({ slot: z.number(), node: z.string(), keys: z.array(z.string()) })),
+  /** One slot: multi-key commands on these keys work, atomically. */
+  sameSlot: z.boolean(),
+  /** Each master's slot ranges, from `CLUSTER SHARDS`. */
+  shards: z.array(z.object({ node: z.string(), slots: z.array(SlotRangeSchema) })),
+});
+export type SlotsInspectResult = z.infer<typeof SlotsInspectResultSchema>;
+
+/**
+ * A connection in CLIENT LIST, by what it is doing: `subscriber` (Pub/Sub), `blocked read` (a stream read waiting:
+ * between reads, its leased client looks like any other), `ioredis` (any other ioredis connection: a mode client,
+ * an idle stream reader…), `showcase probe` (the showcase's own, named `showcase-probe`) or `other` (redis-cli…).
+ */
+export const ClientKindSchema = z.enum(['subscriber', 'blocked read', 'ioredis', 'showcase probe', 'other']);
+export type ClientKind = z.infer<typeof ClientKindSchema>;
+
+/**
+ * Each master, read on demand with native commands (not the package): its slot ranges, `DBSIZE`, the showcase's keys
+ * grouped by namespace (`SCAN showcase:*`), and its client connections by kind (`CLIENT LIST`, every process's).
+ */
+export const SlotsOverviewSchema = z.object({
+  nodes: z.array(
+    z.object({
+      address: z.string(),
+      slots: z.array(SlotRangeSchema),
+      keys: z.number(),
+      /** `showcase:cache` → how many keys under it on this node. */
+      namespaces: z.record(z.string(), z.number()),
+      /** The scan stopped early: the namespace counts are a lower bound. */
+      truncated: z.boolean(),
+      clients: z.array(z.object({ kind: ClientKindSchema, count: z.number() })),
+      error: z.string().optional(),
+    }),
+  ),
+});
+export type SlotsOverview = z.infer<typeof SlotsOverviewSchema>;
+
 /* ───────────── errors: every non-2xx response ───────────── */
 
 export const ErrorBodySchema = z.object({
