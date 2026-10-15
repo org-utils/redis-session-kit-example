@@ -1,0 +1,226 @@
+// PROTOTYPE: built-in, editable examples per operation, with the fields each form shows and the
+// equivalent ioredis-toolkit call. A first draft of every section's demo scenarios.
+
+export type Value = string | number | boolean;
+export type Values = Record<string, Value>;
+
+export interface Field {
+  name: string;
+  label: string;
+  kind: 'text' | 'json' | 'number' | 'boolean' | 'select';
+  options?: string[];
+  help?: string;
+}
+export interface Example { id: string; title: string; description: string; values: Values }
+export interface OpSpec { fields: Field[]; examples: Example[]; call: (v: Values) => string }
+
+const q = (s: Value) => `'${s}'`;
+const json = (s: Value) => { try { return JSON.stringify(JSON.parse(String(s))); } catch { return String(s); } };
+const list = (s: Value) => String(s).split(',').map((x) => x.trim()).filter(Boolean);
+
+export const OPS: Record<string, OpSpec> = {
+  'client.health': {
+    fields: [
+      { name: 'timeoutMs', label: 'timeoutMs', kind: 'number', help: 'PING must answer within this, or the mode is unhealthy' },
+      { name: 'degradedMs', label: 'degradedMs', kind: 'number', help: 'slower than this counts as degraded' },
+    ],
+    examples: [
+      { id: 'default', title: 'Default probe', description: 'The package defaults: 1000 ms timeout, 100 ms degraded.', values: { timeoutMs: 1000, degradedMs: 100 } },
+      { id: 'strict', title: 'Strict readiness probe', description: 'Tight limits a load balancer might use.', values: { timeoutMs: 200, degradedMs: 1 } },
+      { id: 'tolerant', title: 'Tolerant liveness probe', description: 'Only fail when Redis is really gone.', values: { timeoutMs: 3000, degradedMs: 500 } },
+    ],
+    call: (v) => `await redis.health({ timeoutMs: ${v.timeoutMs}, degradedMs: ${v.degradedMs} })`,
+  },
+  'client.collide': {
+    fields: [
+      { name: 'cache', label: 'cache namespace', kind: 'text' },
+      { name: 'sessions', label: 'sessions namespace', kind: 'text' },
+    ],
+    examples: [
+      { id: 'prefix', title: 'Prefix overlap', description: '"app" is a colon-prefix of "app:cache": rejected before connecting.', values: { cache: 'app:cache', sessions: 'app' } },
+      { id: 'equal', title: 'Same namespace', description: 'Two modules writing the same keys: rejected.', values: { cache: 'shared', sessions: 'shared' } },
+      { id: 'safe', title: 'Similar but safe', description: '"app" and "application" do not collide.', values: { cache: 'application', sessions: 'app' } },
+    ],
+    call: (v) => `createRedisClient({ ...conn, cache: { enabled: true, namespace: ${q(v.cache)} }, sessions: { enabled: true, namespace: ${q(v.sessions)} } })`,
+  },
+  'client.mget': {
+    fields: [{ name: 'keys', label: 'keys (comma separated)', kind: 'text' }],
+    examples: [
+      { id: 'cross', title: 'Keys in different slots', description: 'Fine on standalone and sentinel; CROSSSLOT on cluster.', values: { keys: 'a, b, c' } },
+      { id: 'tag', title: 'Same slot via hash tag', description: '{user:42} puts every key in one slot, so cluster accepts it.', values: { keys: '{user:42}:a, {user:42}:b' } },
+      { id: 'aware', title: 'Use mgetClusterAware instead', description: 'Groups keys by slot and fans out; works everywhere.', values: { keys: 'a, b, c' } },
+    ],
+    call: (v) => `await redis.mget(${list(v.keys).map(q).join(', ')})`,
+  },
+
+  'session.create': {
+    fields: [
+      { name: 'userId', label: 'userId', kind: 'text' },
+      { name: 'deviceId', label: 'deviceId', kind: 'text' },
+      { name: 'metadata', label: 'metadata (JSON)', kind: 'json' },
+    ],
+    examples: [
+      { id: 'browser', title: 'Browser login', description: 'A user signs in; the cookie is set and the user\'s session set grows.', values: { userId: 'user-42', deviceId: 'laptop', metadata: '{ "plan": "pro" }' } },
+      { id: 'mobile', title: 'Second device', description: 'Same user on a phone: two sessions in one user\'s session set.', values: { userId: 'user-42', deviceId: 'phone', metadata: '{}' } },
+      { id: 'big', title: 'Metadata over the limit', description: 'More than maxMetadataBytes: SESSION_LIMIT.', values: { userId: 'user-42', deviceId: 'laptop', metadata: '{ "blob": "…9 KiB…" }' } },
+    ],
+    call: (v) => `await redis.sessions.create({ userId: ${q(v.userId)}, deviceId: ${q(v.deviceId)}, metadata: ${json(v.metadata)} })`,
+  },
+  'session.rotate': {
+    fields: [{ name: 'token', label: 'token', kind: 'text', help: 'defaults to this mode\'s session cookie' }],
+    examples: [
+      { id: 'current', title: 'Rotate the current session', description: 'Creates a successor; the old session is consumed.', values: { token: '(cookie)' } },
+      { id: 'replay', title: 'Replay a consumed token', description: 'Presenting the predecessor again: SessionReplayError.', values: { token: '(previous token)' } },
+    ],
+    call: (v) => `await redis.sessions.rotate(${v.token === '(cookie)' ? 'cookieToken' : q(v.token)})`,
+  },
+  'session.revokeAll': {
+    fields: [{ name: 'userId', label: 'userId', kind: 'text' }, { name: 'limit', label: 'limit', kind: 'number' }],
+    examples: [
+      { id: 'all', title: 'Log out everywhere', description: 'Ends every session in the user\'s session set.', values: { userId: 'user-42', limit: 200 } },
+      { id: 'batch', title: 'In batches of 1', description: 'Shows { affected, remaining } across repeated calls.', values: { userId: 'user-42', limit: 1 } },
+    ],
+    call: (v) => `await redis.sessions.revokeAll(${q(v.userId)}, ${v.limit})`,
+  },
+
+  'cache.set': {
+    fields: [
+      { name: 'key', label: 'key', kind: 'text' },
+      { name: 'value', label: 'value (JSON)', kind: 'json' },
+      { name: 'ttl', label: 'ttl (seconds)', kind: 'number' },
+      { name: 'condition', label: 'condition', kind: 'select', options: ['none', 'nx', 'xx'] },
+    ],
+    examples: [
+      { id: 'profile', title: 'Cache a user profile', description: 'A JSON value with the default 5-minute TTL.', values: { key: 'user:42', value: '{ "id": "42", "name": "Ada" }', ttl: 300, condition: 'none' } },
+      { id: 'nx', title: 'Write only if absent (NX)', description: 'Returns false when the key already exists.', values: { key: 'user:42', value: '{ "id": "42" }', ttl: 300, condition: 'nx' } },
+      { id: 'xx', title: 'Update only if present (XX)', description: 'Returns false when there is nothing to update.', values: { key: 'user:404', value: '{ "id": "404" }', ttl: 300, condition: 'xx' } },
+      { id: 'short', title: 'Short-lived value', description: 'Expires in 5 s; watch it vanish in RedisInsight.', values: { key: 'otp:42', value: '"731902"', ttl: 5, condition: 'none' } },
+    ],
+    call: (v) => `await redis.cache.set(${q(v.key)}, ${json(v.value)}, { ttl: ${v.ttl}${v.condition !== 'none' ? `, ${v.condition}: true` : ''} })`,
+  },
+  'cache.get': {
+    fields: [{ name: 'key', label: 'key', kind: 'text' }],
+    examples: [
+      { id: 'hit', title: 'Hit', description: 'A key set by the profile example.', values: { key: 'user:42' } },
+      { id: 'miss', title: 'Miss', description: '{ hit: false } rather than null, so a cached null is distinguishable.', values: { key: 'user:missing' } },
+    ],
+    call: (v) => `await redis.cache.get(${q(v.key)})`,
+  },
+  'cache.clear': {
+    fields: [{ name: 'pattern', label: 'pattern', kind: 'text' }],
+    examples: [
+      { id: 'all', title: 'Clear the namespace', description: 'SCAN + DEL; on cluster it scans every master.', values: { pattern: '*' } },
+      { id: 'users', title: 'Only user keys', description: 'A glob inside the namespace.', values: { pattern: 'user:*' } },
+    ],
+    call: (v) => `await redis.cache.clear(${q(v.pattern)})`,
+  },
+
+  'lock.acquire': {
+    fields: [{ name: 'name', label: 'name', kind: 'text' }, { name: 'ttl', label: 'ttl (seconds)', kind: 'number' }],
+    examples: [
+      { id: 'job', title: 'Nightly report job', description: 'A 30 s lease; run it twice to see the second one refused.', values: { name: 'report:nightly', ttl: 30 } },
+      { id: 'short', title: 'Sub-second lease', description: 'TTLs may be fractional, down to milliseconds.', values: { name: 'cart:42', ttl: 0.5 } },
+      { id: 'limit', title: 'Over maxTtl', description: '600 s exceeds the 300 s maxTtl: LOCK_LIMIT.', values: { name: 'migration', ttl: 600 } },
+    ],
+    call: (v) => `await redis.lock.acquire(${q(v.name)}, ${v.ttl})`,
+  },
+  'lock.extend': {
+    fields: [{ name: 'name', label: 'name', kind: 'text' }, { name: 'token', label: 'token', kind: 'text' }, { name: 'ttl', label: 'ttl (seconds)', kind: 'number' }],
+    examples: [
+      { id: 'mine', title: 'Extend my lease', description: 'Resets the lease to ttl (it does not add to it).', values: { name: 'report:nightly', token: '(last acquired)', ttl: 30 } },
+      { id: 'theirs', title: 'Someone else\'s token', description: 'Compare-and-PEXPIRE fails: false.', values: { name: 'report:nightly', token: 'not-my-token', ttl: 30 } },
+    ],
+    call: (v) => `await redis.lock.extend(${q(v.name)}, token, ${v.ttl})`,
+  },
+  'lock.release': {
+    fields: [{ name: 'name', label: 'name', kind: 'text' }, { name: 'token', label: 'token', kind: 'text' }],
+    examples: [
+      { id: 'mine', title: 'Release with my token', description: 'Lua compare-and-delete: true.', values: { name: 'report:nightly', token: '(last acquired)' } },
+      { id: 'theirs', title: 'Release with a wrong token', description: 'The lock survives: false.', values: { name: 'report:nightly', token: 'not-my-token' } },
+    ],
+    call: (v) => `await redis.lock.release(${q(v.name)}, token)`,
+  },
+
+  'rate-limit.consume': {
+    fields: [{ name: 'subject', label: 'subject', kind: 'text' }, { name: 'cost', label: 'cost', kind: 'number' }],
+    examples: [
+      { id: 'one', title: 'One request', description: '100 per 60 s window; remaining goes down by one.', values: { subject: 'user:42', cost: 1 } },
+      { id: 'bulk', title: 'Expensive request', description: 'Costs 25 of the window at once.', values: { subject: 'user:42', cost: 25 } },
+      { id: 'bad', title: 'Invalid cost', description: 'Cost must be a positive integer: RATE_LIMIT_INPUT.', values: { subject: 'user:42', cost: 0 } },
+    ],
+    call: (v) => `await redis.rateLimiter.consume(${q(v.subject)}, ${v.cost})`,
+  },
+  'rate-limit.check': {
+    fields: [{ name: 'subject', label: 'subject', kind: 'text' }],
+    examples: [{ id: 'peek', title: 'Peek without consuming', description: 'Same result shape, count unchanged.', values: { subject: 'user:42' } }],
+    call: (v) => `await redis.rateLimiter.check(${q(v.subject)})`,
+  },
+  'rate-limit.reset': {
+    fields: [{ name: 'subject', label: 'subject', kind: 'text' }],
+    examples: [{ id: 'reset', title: 'Reset a subject', description: 'Deletes the window; the next consume starts fresh.', values: { subject: 'user:42' } }],
+    call: (v) => `await redis.rateLimiter.reset(${q(v.subject)})`,
+  },
+
+  'pubsub.publish': {
+    fields: [{ name: 'channel', label: 'channel', kind: 'text' }, { name: 'message', label: 'message (JSON)', kind: 'json' }],
+    examples: [
+      { id: 'order', title: 'Order created', description: 'Returns the subscriber count; on cluster it can be 0 even when delivered.', values: { channel: 'orders.created', message: '{ "orderId": "42", "total": 19.99 }' } },
+      { id: 'nobody', title: 'Nobody listening', description: 'A channel with no subscribers: 0.', values: { channel: 'orders.cancelled', message: '{ "orderId": "7" }' } },
+    ],
+    call: (v) => `await redis.pubsub.publish(${q(v.channel)}, ${json(v.message)})`,
+  },
+  'pubsub.subscribe': {
+    fields: [{ name: 'channel', label: 'channel', kind: 'text' }],
+    examples: [{ id: 'listen', title: 'Listen to orders', description: 'Opens a live stream; publish from another tab to see it arrive.', values: { channel: 'orders.created' } }],
+    call: (v) => `await redis.pubsub.subscribe(${q(v.channel)}, (msg) => …)`,
+  },
+
+  'streams.add': {
+    fields: [{ name: 'stream', label: 'stream', kind: 'text' }, { name: 'fields', label: 'fields (JSON)', kind: 'json' }, { name: 'maxEntries', label: 'maxEntries', kind: 'number' }],
+    examples: [
+      { id: 'event', title: 'Append an order event', description: 'XADD with an approximate MAXLEN cap.', values: { stream: 'orders', fields: '{ "orderId": "42", "type": "created" }', maxEntries: 100000 } },
+      { id: 'capped', title: 'Tiny capped stream', description: 'maxEntries 10: older entries get trimmed.', values: { stream: 'recent', fields: '{ "n": "1" }', maxEntries: 10 } },
+      { id: 'empty', title: 'No fields', description: 'An empty field map: STREAMS_INPUT.', values: { stream: 'orders', fields: '{}', maxEntries: 100000 } },
+    ],
+    call: (v) => `await redis.streams.add(${q(v.stream)}, ${json(v.fields)}, ${v.maxEntries})`,
+  },
+  'streams.read': {
+    fields: [
+      { name: 'stream', label: 'stream', kind: 'text' }, { name: 'group', label: 'group', kind: 'text' },
+      { name: 'consumer', label: 'consumer', kind: 'text' }, { name: 'count', label: 'count', kind: 'number' },
+      { name: 'pending', label: 're-read my pending entries (id 0)', kind: 'boolean' },
+    ],
+    examples: [
+      { id: 'new', title: 'New entries for worker-1', description: 'Group read with ">" : entries become pending until acked.', values: { stream: 'orders', group: 'billing', consumer: 'worker-1', count: 10, pending: false } },
+      { id: 'pending', title: 'Recover pending entries', description: 'id 0 re-delivers what worker-1 never acked.', values: { stream: 'orders', group: 'billing', consumer: 'worker-1', count: 10, pending: true } },
+      { id: 'nogroup', title: 'Missing group', description: 'Reading a group that was never created: NOGROUP from Redis.', values: { stream: 'orders', group: 'ghost', consumer: 'worker-1', count: 10, pending: false } },
+    ],
+    call: (v) => `await redis.streams.read(${q(v.stream)}, { group: ${q(v.group)}, consumer: ${q(v.consumer)}, count: ${v.count}${v.pending ? ", id: '0'" : ''} })`,
+  },
+  'streams.ack': {
+    fields: [{ name: 'stream', label: 'stream', kind: 'text' }, { name: 'group', label: 'group', kind: 'text' }, { name: 'ids', label: 'ids (comma separated)', kind: 'text' }],
+    examples: [{ id: 'ack', title: 'Ack what I read', description: 'Clears entries from the pending list.', values: { stream: 'orders', group: 'billing', ids: '(last read ids)' } }],
+    call: (v) => `await redis.streams.ack(${q(v.stream)}, ${q(v.group)}, ...ids)`,
+  },
+
+  'failover.failover': {
+    fields: [{ name: 'master', label: 'master name', kind: 'text' }],
+    examples: [
+      { id: 'graceful', title: 'Graceful failover', description: 'Promotes the replica; the package carries on without errors.', values: { master: 'mymaster' } },
+      { id: 'unready', title: 'While not failover-ready', description: 'Replica still syncing: data written meanwhile can be lost.', values: { master: 'mymaster' } },
+    ],
+    call: (v) => `SENTINEL FAILOVER ${v.master}   // sent by the showcase, not the package`,
+  },
+  'slots.keyslot': {
+    fields: [{ name: 'key', label: 'key', kind: 'text' }],
+    examples: [
+      { id: 'plain', title: 'Plain key', description: 'The whole key is hashed.', values: { key: 'user:42:profile' } },
+      { id: 'tag', title: 'Hash tag', description: 'Only {user:42} is hashed, so related keys share a slot.', values: { key: '{user:42}:profile' } },
+      { id: 'session', title: 'How sessions place keys', description: 'Session keys share {sha256(userId)}, so one user\'s keys share a slot.', values: { key: 'showcase:session:user-sessions:{a3f9c21e}' } },
+    ],
+    call: (v) => `CLUSTER KEYSLOT ${v.key}   // the showcase asks Redis; the package's slot helpers aren't public`,
+  },
+};
+
+export const spec = (moduleId: string, opId: string): OpSpec => OPS[`${moduleId}.${opId}`];
+export const primary = (s: OpSpec, v: Values) => String(v[s.fields[0]?.name] ?? '');

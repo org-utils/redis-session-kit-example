@@ -1,1 +1,7 @@
 .claude/settings.local.json
+node_modules/
+.next/
+next-env.d.ts
+apps/frontend/AGENTS.md
+apps/frontend/CLAUDE.md
+*.tsbuildinfo
