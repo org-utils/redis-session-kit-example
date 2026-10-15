@@ -111,8 +111,11 @@ export const RedisTraceSchema = z.object({
 });
 export type RedisTrace = z.infer<typeof RedisTraceSchema>;
 
-/** A 2xx from a feature module: the package's own result, untouched, and the Redis trace beside it. */
-export const TracedResultSchema = z.object({ result: z.unknown(), redis: RedisTraceSchema });
+/**
+ * A 2xx from a feature module: the package's own result, untouched, and the Redis trace beside it. A response that sets
+ * or clears a cookie also carries that `Set-Cookie` header's value, so the page can show what the browser was told.
+ */
+export const TracedResultSchema = z.object({ result: z.unknown(), redis: RedisTraceSchema, setCookie: z.string().optional() });
 export type TracedResult = z.infer<typeof TracedResultSchema>;
 
 /* ───────────── cache: POST /api/:mode/cache/<operation> ───────────── */
@@ -317,6 +320,53 @@ export const StreamsFollowEventSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('error'), message: z.string() }),
 ]);
 export type StreamsFollowEvent = z.infer<typeof StreamsFollowEventSchema>;
+
+/* ───────────── session: POST /api/:mode/session/<operation>, GET …/cookie, …/stored, …/metrics ───────────── */
+
+// The package validates the values itself (SESSION_INVALID for a missing securityVersion, a ttl over absoluteTimeout…).
+const SessionMetadataSchema = z.record(z.string(), z.union([z.string(), z.number(), z.boolean(), z.null()]));
+
+/** A fake login: any user id, no password. IP address and user agent come from the request, as a real login's would. */
+export const SessionCreateRequestSchema = z.object({
+  userId: z.string(),
+  deviceId: z.string().optional(),
+  securityVersion: z.number().optional(),
+  metadata: SessionMetadataSchema.optional(),
+  /** Per-session overrides of the configured lifetimes, in seconds. */
+  ttl: z.number().optional(),
+  idleTimeout: z.number().optional(),
+  absoluteTimeout: z.number().optional(),
+});
+
+/** A credential to present. Without `token`, the one in this mode's session cookie, as a real request would carry it. */
+export const SessionTokenRequestSchema = z.object({ token: z.string().optional() });
+export const SessionUpdateRequestSchema = z.object({
+  token: z.string().optional(),
+  /** Replaces the stored metadata as a whole. */
+  metadata: SessionMetadataSchema,
+  expectedVersion: z.number().optional(),
+});
+
+/** The session cookie this mode's request arrived with: what the browser holds, since it is HttpOnly. */
+export const SessionCookieSchema = z.object({ name: z.string(), value: z.string().nullable() });
+export type SessionCookie = z.infer<typeof SessionCookieSchema>;
+
+/** A session record as Redis stores it, read with a native GET (not a package call): encrypted, so ciphertext. */
+export const SessionStoredQuerySchema = z.object({ userId: z.string(), id: z.string() });
+export const SessionStoredSchema = z.object({
+  key: z.string(),
+  /** The stored value as is, or null when the key is gone. */
+  value: z.string().nullable(),
+  /** Seconds left, or null when the key has no expiry or is gone. */
+  ttl: z.number().nullable(),
+});
+export type SessionStored = z.infer<typeof SessionStoredSchema>;
+
+/** What the package reported to this mode's metrics sink since the backend started, one entry per name and labels. */
+export const SessionMetricsSchema = z.object({
+  counters: z.array(z.object({ name: z.string(), labels: z.record(z.string(), z.string()), value: z.number() })),
+});
+export type SessionMetricsSnapshot = z.infer<typeof SessionMetricsSchema>;
 
 /* ───────────── errors: every non-2xx response ───────────── */
 

@@ -3,7 +3,8 @@ import assert from 'node:assert/strict';
 import { after, before, test } from 'node:test';
 import { ErrorBodySchema } from '@showcase/contracts';
 import {
-  CacheError, LockError, RateLimitError, RedisConfigurationError, SessionConflictError, SessionLimitError, SessionNotFoundError,
+  CacheError, LockError, RateLimitError, RedisConfigurationError, SessionConflictError, SessionExpiredError, SessionInvalidError,
+  SessionLimitError, SessionNotFoundError,
 } from 'ioredis-toolkit';
 import { z } from 'zod';
 import { buildApp, type FeatureModule } from '../app.ts';
@@ -13,6 +14,8 @@ const thrown: Record<string, () => Error> = {
   'cache-input': () => new CacheError('CACHE_INPUT', 'key must not be empty'),
   'session-not-found': () => new SessionNotFoundError(),
   'session-conflict': () => new SessionConflictError(),
+  'session-expired': () => new SessionExpiredError(),
+  'session-invalid': () => new SessionInvalidError(),
   'lock-held': () => new LockError('LOCK_HELD', 'lock job:1 is held'),
   'session-limit': () => new SessionLimitError('metadata exceeds maxMetadataBytes'),
   'rate-limit-configuration': () => new RateLimitError('RATE_LIMIT_CONFIGURATION', 'limit must be positive'),
@@ -42,6 +45,8 @@ const cases: [kind: string, status: number, code: string][] = [
   ['cache-input', 400, 'CACHE_INPUT'],
   ['session-not-found', 404, 'SESSION_NOT_FOUND'],
   ['session-conflict', 409, 'SESSION_CONFLICT'],
+  ['session-expired', 401, 'SESSION_EXPIRED'],
+  ['session-invalid', 400, 'SESSION_INVALID'],
   ['lock-held', 409, 'LOCK_HELD'],
   ['session-limit', 413, 'SESSION_LIMIT'],
   ['rate-limit-configuration', 500, 'RATE_LIMIT_CONFIGURATION'],
