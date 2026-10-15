@@ -1,8 +1,11 @@
 // PROTOTYPE: floating variant switcher. Never ships: hidden in production builds.
 'use client';
 
+import { ChevronLeft, ChevronRight } from 'lucide-react';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { useEffect } from 'react';
+import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
 
 export function PrototypeSwitcher({ variants }: { variants: Array<{ key: string; name: string }> }) {
   const router = useRouter();
@@ -31,11 +34,13 @@ export function PrototypeSwitcher({ variants }: { variants: Array<{ key: string;
 
   if (process.env.NODE_ENV === 'production') return null;
   const v = variants[index];
+  // Deliberately loud (inverted foreground) so it never reads as part of the design.
   return (
-    <div className="fixed bottom-4 left-1/2 z-50 flex -translate-x-1/2 items-center gap-3 rounded-full bg-fuchsia-600 px-4 py-2 text-sm font-semibold text-white shadow-2xl ring-2 ring-white/40">
-      <button onClick={() => go(-1)} aria-label="Previous variant">◀</button>
-      <span>PROTOTYPE · {v.key} ({v.name})</span>
-      <button onClick={() => go(1)} aria-label="Next variant">▶</button>
+    <div className="fixed bottom-4 left-1/2 z-50 flex -translate-x-1/2 items-center gap-1 rounded-full bg-foreground p-1 text-background shadow-2xl">
+      <Button variant="ghost" size="icon-sm" className="rounded-full hover:bg-background/20 hover:text-background" onClick={() => go(-1)} aria-label="Previous variant"><ChevronLeft /></Button>
+      <Badge variant="outline" className="border-background/40 text-background">PROTOTYPE</Badge>
+      <span className="px-2 text-sm font-medium">{v.key} · {v.name}</span>
+      <Button variant="ghost" size="icon-sm" className="rounded-full hover:bg-background/20 hover:text-background" onClick={() => go(1)} aria-label="Next variant"><ChevronRight /></Button>
     </div>
   );
 }

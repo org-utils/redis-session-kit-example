@@ -1,51 +1,80 @@
-// PROTOTYPE: tiny presentational bits shared by the variants (no layout here).
+// PROTOTYPE: small compositions of shadcn primitives shared by the variants (no layout here).
 'use client';
 
-import type { KeyTouched, Mode, RunResult } from './stub';
-import { INITIAL_STATUS } from './stub';
+import { ExternalLink } from 'lucide-react';
+import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import { cn } from '@/lib/utils';
+import type { Health, KeyTouched, Mode, RunResult } from './stub';
+import { INITIAL_STATUS, healthDot, modeText } from './stub';
 
-export function StatusBadge({ code }: { code: number }) {
-  const c = code >= 500 ? 'bg-rose-500/20 text-rose-300' : code >= 400 ? 'bg-amber-500/20 text-amber-300' : 'bg-emerald-500/20 text-emerald-300';
-  return <span className={`rounded px-1.5 py-0.5 font-mono text-xs ${c}`}>{code}</span>;
+export function HttpBadge({ code }: { code: number }) {
+  if (code >= 500) return <Badge variant="destructive" className="font-mono">{code}</Badge>;
+  if (code >= 400) return <Badge className="bg-warning font-mono text-warning-foreground">{code}</Badge>;
+  return <Badge className="bg-success font-mono text-success-foreground">{code}</Badge>;
+}
+
+export function HealthDot({ health }: { health: Health }) {
+  return <span aria-label={health} className={cn('inline-block size-2 shrink-0 rounded-full', healthDot[health])} />;
+}
+
+export function ModeName({ mode, className }: { mode: Mode; className?: string }) {
+  return <span className={cn('font-medium', modeText[mode], className)}>{mode}</span>;
 }
 
 export function Json({ value }: { value: unknown }) {
-  return <pre className="overflow-x-auto rounded bg-black/40 p-2 font-mono text-xs leading-relaxed text-zinc-300">{JSON.stringify(value, null, 2)}</pre>;
-}
-
-export function KeysTable({ keys, mode }: { keys: KeyTouched[]; mode: Mode }) {
-  if (!keys.length) return <p className="text-xs text-zinc-500">No keys touched.</p>;
   return (
-    <table className="w-full font-mono text-xs">
-      <thead className="text-left text-zinc-500">
-        <tr><th className="pr-2 font-normal">key</th><th className="pr-2 font-normal">type</th><th className="pr-2 font-normal">ttl</th>{mode === 'cluster' && <th className="font-normal">slot → node</th>}</tr>
-      </thead>
-      <tbody>
-        {keys.map((k) => (
-          <tr key={k.key} className="align-top">
-            <td className="break-all pr-2 text-sky-300">{k.key}</td>
-            <td className="pr-2">{k.type}</td>
-            <td className="pr-2">{k.ttl ?? '∞'}</td>
-            {mode === 'cluster' && <td className="whitespace-nowrap text-violet-300">{k.slot} → {k.node?.split(':')[1]}</td>}
-          </tr>
-        ))}
-      </tbody>
-    </table>
+    <pre className="overflow-x-auto rounded-md bg-code p-3 font-mono text-xs leading-relaxed text-code-foreground">
+      {JSON.stringify(value, null, 2)}
+    </pre>
   );
 }
 
-export function InsightLink({ mode, keyName }: { mode: Mode; keyName?: string }) {
+export function KeysTable({ keys, mode }: { keys: KeyTouched[]; mode: Mode }) {
+  if (!keys.length) return <p className="text-xs text-muted-foreground">No keys touched.</p>;
   return (
-    <a href={INITIAL_STATUS[mode].redisInsight} target="_blank" rel="noreferrer" className="text-xs text-sky-400 underline decoration-dotted hover:text-sky-300">
-      Open {keyName ? 'key ' : ''}in RedisInsight ({mode}) ↗
-    </a>
+    <Table className="font-mono text-xs">
+      <TableHeader>
+        <TableRow>
+          <TableHead>key</TableHead>
+          <TableHead>type</TableHead>
+          <TableHead>ttl</TableHead>
+          {mode === 'cluster' && <TableHead>slot → node</TableHead>}
+        </TableRow>
+      </TableHeader>
+      <TableBody>
+        {keys.map((k) => (
+          <TableRow key={k.key}>
+            <TableCell className="max-w-56 whitespace-normal break-all text-code-key">{k.key}</TableCell>
+            <TableCell>{k.type}</TableCell>
+            <TableCell>{k.ttl ?? '∞'}</TableCell>
+            {mode === 'cluster' && <TableCell className="text-code-slot">{k.slot} → {k.node?.split(':')[1]}</TableCell>}
+          </TableRow>
+        ))}
+      </TableBody>
+    </Table>
+  );
+}
+
+export function InsightLink({ mode }: { mode: Mode }) {
+  return (
+    <Button variant="link" size="xs" className="h-auto px-0" asChild>
+      <a href={INITIAL_STATUS[mode].redisInsight} target="_blank" rel="noreferrer">
+        RedisInsight · {mode} <ExternalLink />
+      </a>
+    </Button>
   );
 }
 
 export function Commands({ r }: { r: RunResult }) {
   return (
-    <ul className="space-y-0.5 font-mono text-xs text-zinc-400">
-      {r.commands.map((c, i) => <li key={i}>› {c}</li>)}
+    <ul className="space-y-0.5 rounded-md bg-code p-3 font-mono text-xs text-code-foreground">
+      {r.commands.length ? r.commands.map((c, i) => <li key={i}>› {c}</li>) : <li className="text-muted-foreground">none</li>}
     </ul>
   );
+}
+
+export function CliSnippet({ mode }: { mode: Mode }) {
+  return <code className="block break-all rounded-md bg-code p-2 font-mono text-[11px] text-code-foreground">{INITIAL_STATUS[mode].cli}</code>;
 }

@@ -1,9 +1,21 @@
-// PROTOTYPE variant B: mode matrix. Modules as top tabs; three mode columns are always on screen, each a self-contained lane.
+// PROTOTYPE variant B: mode matrix. Modules as top tabs; three mode lanes (Cards) always on screen.
 'use client';
 
+import { Database, Play } from 'lucide-react';
 import { useState } from 'react';
-import { Commands, InsightLink, Json, KeysTable, StatusBadge } from './bits';
-import { MODES, MODULES, healthDot, runOp, useStubLive, type Mode, type RunResult } from './stub';
+import { ThemeToggle } from '@/components/theme-toggle';
+import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
+import { Card, CardAction, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
+import { Input } from '@/components/ui/input';
+import { ScrollArea } from '@/components/ui/scroll-area';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Separator } from '@/components/ui/separator';
+import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
+import { cn } from '@/lib/utils';
+import { Commands, HealthDot, HttpBadge, InsightLink, Json, KeysTable, ModeName } from './bits';
+import { MODES, MODULES, healthText, modeBorder, runOp, useStubLive, type Mode, type RunResult } from './stub';
 
 export const name = 'Mode matrix, three lanes';
 
@@ -14,7 +26,7 @@ export function VariantB() {
   const [opId, setOpId] = useState(mod.ops[0].id);
   const op = mod.ops.find((o) => o.id === opId) ?? mod.ops[0];
   const [input, setInput] = useState(op.input);
-  const [targets, setTargets] = useState<Record<Mode, boolean>>({ standalone: true, sentinel: true, cluster: true });
+  const [targets, setTargets] = useState<string[]>([...MODES]);
   const [last, setLast] = useState<Partial<Record<Mode, RunResult>>>({});
 
   const applies = (md: Mode) => !mod.onlyMode || mod.onlyMode === md;
@@ -23,76 +35,90 @@ export function VariantB() {
     setModuleId(id); setOpId(m.ops[0].id); setInput(m.ops[0].input); setLast({});
   };
   const run = (only?: Mode) => {
-    const next: Partial<Record<Mode, RunResult>> = { ...last };
-    for (const md of MODES) if (applies(md) && (only ? md === only : targets[md])) next[md] = runOp(md, moduleId, op.id, input, status[md]);
+    const next = { ...last };
+    for (const md of MODES) if (applies(md) && (only ? md === only : targets.includes(md))) next[md] = runOp(md, moduleId, op.id, input, status[md]);
     setLast(next);
   };
 
   return (
-    <div className="flex h-screen flex-col">
-      {/* top bar: module tabs */}
-      <header className="flex items-center gap-6 border-b border-zinc-800 bg-zinc-900 px-5">
-        <div className="py-3 text-sm font-bold">ioredis-toolkit</div>
-        <nav className="flex gap-1 overflow-x-auto">
-          {MODULES.map((m) => (
-            <button key={m.id} onClick={() => pick(m.id)} className={`whitespace-nowrap border-b-2 px-3 py-3 text-sm ${moduleId === m.id ? 'border-sky-400 text-white' : 'border-transparent text-zinc-400 hover:text-zinc-200'}`}>
-              {m.label}{m.onlyMode && <span className="ml-1 rounded bg-violet-500/20 px-1 text-[10px] text-violet-300">{m.onlyMode}</span>}
-            </button>
-          ))}
-        </nav>
+    <div className="flex h-svh flex-col bg-background">
+      <header className="flex shrink-0 items-center gap-4 border-b px-4">
+        <div className="flex items-center gap-2 py-3 text-sm font-semibold"><Database className="size-4" /> ioredis-toolkit</div>
+        <Separator orientation="vertical" className="h-5" />
+        <Tabs value={moduleId} onValueChange={pick} className="min-w-0 flex-1">
+          <TabsList variant="line" className="h-12">
+            {MODULES.map((m) => (
+              <TabsTrigger key={m.id} value={m.id}>
+                {m.label}{m.onlyMode && <Badge variant="outline" className="ml-1 px-1 text-[10px]"><ModeName mode={m.onlyMode} /></Badge>}
+              </TabsTrigger>
+            ))}
+          </TabsList>
+        </Tabs>
+        <ThemeToggle />
       </header>
 
-      {/* operation bar, spans all lanes */}
-      <div className="flex flex-wrap items-center gap-3 border-b border-zinc-800 px-5 py-3">
-        <span className="text-sm text-zinc-400">{mod.blurb}</span>
-        <div className="ml-auto flex items-center gap-2">
-          <select value={op.id} onChange={(e) => { setOpId(e.target.value); setInput(mod.ops.find((o) => o.id === e.target.value)!.input); }} className="rounded border border-zinc-700 bg-zinc-900 px-2 py-1.5 font-mono text-sm">
-            {mod.ops.map((o) => <option key={o.id} value={o.id}>{o.label}</option>)}
-          </select>
-          {op.placeholder && <input value={input} onChange={(e) => setInput(e.target.value)} placeholder={op.placeholder} className="w-56 rounded border border-zinc-700 bg-zinc-900 px-2 py-1.5 font-mono text-sm" />}
-          {!mod.onlyMode && MODES.map((md) => (
-            <label key={md} className="flex items-center gap-1 text-xs text-zinc-400"><input type="checkbox" checked={targets[md]} onChange={(e) => setTargets({ ...targets, [md]: e.target.checked })} />{md}</label>
-          ))}
-          <button onClick={() => run()} className="rounded bg-sky-600 px-4 py-1.5 text-sm font-medium hover:bg-sky-500">Run {mod.onlyMode ? `on ${mod.onlyMode}` : 'on selected'}</button>
+      <div className="flex shrink-0 flex-wrap items-center gap-3 border-b bg-muted/30 px-4 py-3">
+        <span className="text-sm text-muted-foreground">{mod.blurb}</span>
+        <div className="ml-auto flex flex-wrap items-center gap-2">
+          <Select value={op.id} onValueChange={(v) => { setOpId(v); setInput(mod.ops.find((o) => o.id === v)!.input); }}>
+            <SelectTrigger className="w-44 font-mono"><SelectValue /></SelectTrigger>
+            <SelectContent>{mod.ops.map((o) => <SelectItem key={o.id} value={o.id} className="font-mono">{o.label}</SelectItem>)}</SelectContent>
+          </Select>
+          {op.placeholder && <Input value={input} onChange={(e) => setInput(e.target.value)} placeholder={op.placeholder} className="w-56 font-mono" />}
+          {!mod.onlyMode && (
+            <ToggleGroup type="multiple" variant="outline" size="sm" value={targets} onValueChange={setTargets}>
+              {MODES.map((md) => <ToggleGroupItem key={md} value={md}><ModeName mode={md} /></ToggleGroupItem>)}
+            </ToggleGroup>
+          )}
+          <Button onClick={() => run()}><Play /> Run {mod.onlyMode ? `on ${mod.onlyMode}` : 'on selected'}</Button>
         </div>
       </div>
 
-      {/* three lanes */}
-      <div className="grid min-h-0 flex-1 grid-cols-3 divide-x divide-zinc-800">
+      <div className="grid min-h-0 flex-1 grid-cols-3 gap-3 p-3">
         {MODES.map((md) => {
           const s = status[md];
           const r = last[md];
           const lane = events.filter((e) => e.mode === md);
           return (
-            <section key={md} className={`flex min-h-0 flex-col ${applies(md) ? '' : 'opacity-35'}`}>
-              <div className="border-b border-zinc-800 bg-zinc-900/60 p-4">
-                <div className="flex items-center justify-between">
-                  <h2 className="flex items-center gap-2 text-lg font-semibold"><span className={`h-2.5 w-2.5 rounded-full ${healthDot[s.health]}`} />{md}</h2>
-                  <span className="font-mono text-xs text-zinc-400">{s.health} · {s.latencyMs}ms</span>
+            <Card key={md} className={cn('min-h-0 gap-0 border-t-4 py-0', modeBorder[md], !applies(md) && 'opacity-40')}>
+              <CardHeader className="border-b py-4">
+                <CardTitle className="flex items-center gap-2 text-lg"><HealthDot health={s.health} /><ModeName mode={md} /></CardTitle>
+                <CardDescription>{s.detail.join(' · ')}</CardDescription>
+                <CardAction className={cn('font-mono text-xs', healthText[s.health])}>{s.health} · {s.latencyMs}ms</CardAction>
+                <div className="flex flex-wrap items-center gap-3 pt-1">
+                  {s.failoverReady !== undefined && <Badge variant={s.failoverReady ? 'secondary' : 'destructive'}>{s.failoverReady ? 'failover ready' : 'not failover ready'}</Badge>}
+                  <InsightLink mode={md} />
+                  {applies(md) && <Button variant="link" size="xs" className="h-auto px-0" onClick={() => run(md)}>run here only</Button>}
                 </div>
-                <div className="mt-1 text-xs text-zinc-500">{s.detail.join(' · ')}</div>
-                {s.failoverReady !== undefined && <div className="mt-1 text-xs">failoverReady <span className={s.failoverReady ? 'text-emerald-300' : 'text-rose-300'}>{String(s.failoverReady)}</span></div>}
-                <div className="mt-2 flex gap-3"><InsightLink mode={md} />{applies(md) && <button onClick={() => run(md)} className="text-xs text-sky-400 underline decoration-dotted">run here only</button>}</div>
-              </div>
-              <div className="min-h-0 flex-1 space-y-4 overflow-y-auto p-4">
-                {!applies(md) && <p className="text-sm text-zinc-400">{mod.label} only exists on {mod.onlyMode}.</p>}
-                {applies(md) && md === 'sentinel' && mod.id === 'failover' && (
-                  <button onClick={simulateFailover} className="rounded border border-amber-500 px-3 py-1.5 text-sm text-amber-300">simulate failover in status</button>
-                )}
-                {r ? (
-                  <>
-                    <div className="flex items-center justify-between text-xs text-zinc-500"><span>{r.at} · {r.op}({r.input})</span><span className="flex items-center gap-2 font-mono">{r.latencyMs}ms <StatusBadge code={r.httpStatus} /></span></div>
-                    <Json value={r.body} />
-                    <div><div className="mb-1 text-xs uppercase text-zinc-500">Keys</div><KeysTable keys={r.keys} mode={md} /></div>
-                    <div><div className="mb-1 text-xs uppercase text-zinc-500">Commands</div><Commands r={r} /></div>
-                  </>
-                ) : applies(md) && <p className="text-sm text-zinc-600">No run yet.</p>}
-              </div>
-              <ul className="h-28 overflow-y-auto border-t border-zinc-800 bg-black/30 px-4 py-2 pb-12 font-mono text-[11px]">
-                {lane.map((e) => <li key={e.id} className={e.kind === 'error' ? 'text-rose-300' : 'text-amber-200'}><span className="text-zinc-600">{e.at}</span> {e.text}</li>)}
-                {!lane.length && <li className="text-zinc-600">event log: quiet</li>}
-              </ul>
-            </section>
+              </CardHeader>
+              <CardContent className="min-h-0 flex-1 p-0">
+                <ScrollArea className="h-full">
+                  <div className="space-y-4 p-4">
+                    {!applies(md) && <p className="text-sm text-muted-foreground">{mod.label} only exists on {mod.onlyMode}.</p>}
+                    {applies(md) && md === 'sentinel' && mod.id === 'failover' && <Button variant="outline" onClick={simulateFailover}>Simulate failover in status</Button>}
+                    {r ? (
+                      <>
+                        <div className="flex items-center justify-between text-xs text-muted-foreground">
+                          <span className="font-mono">{r.at} · {r.op}({r.input})</span>
+                          <span className="flex items-center gap-2 font-mono">{r.latencyMs}ms <HttpBadge code={r.httpStatus} /></span>
+                        </div>
+                        <Json value={r.body} />
+                        <div className="space-y-1"><div className="text-xs font-medium uppercase text-muted-foreground">Keys</div><KeysTable keys={r.keys} mode={md} /></div>
+                        <div className="space-y-1"><div className="text-xs font-medium uppercase text-muted-foreground">Commands</div><Commands r={r} /></div>
+                      </>
+                    ) : applies(md) && <p className="text-sm text-muted-foreground">No run yet.</p>}
+                  </div>
+                </ScrollArea>
+              </CardContent>
+              <CardFooter className="block h-28 border-t bg-muted/30 p-0">
+                <ScrollArea className="h-full">
+                  <ul className="px-4 py-2 font-mono text-[11px]">
+                    {lane.map((e) => <li key={e.id} className={e.kind === 'error' ? 'text-destructive' : 'text-warning'}><span className="text-muted-foreground">{e.at}</span> {e.text}</li>)}
+                    {!lane.length && <li className="text-muted-foreground">event log: quiet</li>}
+                  </ul>
+                </ScrollArea>
+              </CardFooter>
+            </Card>
           );
         })}
       </div>

@@ -178,9 +178,9 @@ export function runOp(mode: Mode, moduleId: string, opId: string, input: string,
   }
 }
 
-export interface ShowcaseEvent { id: number; at: string; mode: Mode; kind: 'health' | 'error'; text: string }
+export interface ShowcaseEvent { id: number; ts: number; at: string; mode: Mode; kind: 'health' | 'error'; text: string }
 
-const AMBIENT: Array<Omit<ShowcaseEvent, 'id' | 'at'>> = [
+const AMBIENT: Array<Omit<ShowcaseEvent, 'id' | 'at' | 'ts'>> = [
   { mode: 'cluster', kind: 'health', text: 'health degraded (latency 132 ms on 127.0.0.1:7002)' },
   { mode: 'cluster', kind: 'health', text: 'health healthy' },
   { mode: 'standalone', kind: 'error', text: "pubsub-handler: handler for 'orders.created' threw TypeError" },
@@ -192,8 +192,8 @@ export function useStubLive() {
   const [status, setStatus] = useState(INITIAL_STATUS);
   const [events, setEvents] = useState<ShowcaseEvent[]>([]);
   const nextId = useRef(0);
-  const push = (e: Omit<ShowcaseEvent, 'id' | 'at'>) =>
-    setEvents((prev) => [{ ...e, id: ++nextId.current, at: new Date().toLocaleTimeString() }, ...prev].slice(0, 200));
+  const push = (e: Omit<ShowcaseEvent, 'id' | 'at' | 'ts'>) =>
+    setEvents((prev) => [{ ...e, id: ++nextId.current, ts: Date.now(), at: new Date().toLocaleTimeString() }, ...prev].slice(0, 200));
 
   useEffect(() => {
     const t = setInterval(() => push(AMBIENT[Math.floor(Math.random() * AMBIENT.length)]), 6000);
@@ -221,6 +221,16 @@ export function useStubLive() {
   return { status, events, simulateFailover };
 }
 
+// Token classes only (see the showcase tokens in app/globals.css).
 export const healthDot: Record<Health, string> = {
-  healthy: 'bg-emerald-400', degraded: 'bg-amber-400', unhealthy: 'bg-rose-500',
+  healthy: 'bg-success', degraded: 'bg-warning', unhealthy: 'bg-destructive',
+};
+export const healthText: Record<Health, string> = {
+  healthy: 'text-success', degraded: 'text-warning', unhealthy: 'text-destructive',
+};
+export const modeText: Record<Mode, string> = {
+  standalone: 'text-mode-standalone', sentinel: 'text-mode-sentinel', cluster: 'text-mode-cluster',
+};
+export const modeBorder: Record<Mode, string> = {
+  standalone: 'border-t-mode-standalone', sentinel: 'border-t-mode-sentinel', cluster: 'border-t-mode-cluster',
 };

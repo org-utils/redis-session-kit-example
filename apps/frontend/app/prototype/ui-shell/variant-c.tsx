@@ -1,13 +1,27 @@
-// PROTOTYPE variant C: console timeline. Icon rail, a composer with mode chips, and one history mixing runs and events; a detail pane for the selected run.
+// PROTOTYPE variant C: console timeline. Icon rail, a composer with mode toggles, one history mixing runs and events, a detail pane.
 'use client';
 
+import { CornerDownLeft, Database } from 'lucide-react';
 import { useMemo, useState } from 'react';
-import { Commands, InsightLink, Json, KeysTable, StatusBadge } from './bits';
-import { MODES, MODULES, healthDot, runOp, useStubLive, type Mode, type RunResult, type ShowcaseEvent } from './stub';
+import { ThemeToggle } from '@/components/theme-toggle';
+import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Checkbox } from '@/components/ui/checkbox';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { ScrollArea } from '@/components/ui/scroll-area';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Separator } from '@/components/ui/separator';
+import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
+import { cn } from '@/lib/utils';
+import { CliSnippet, Commands, HealthDot, HttpBadge, InsightLink, Json, KeysTable, ModeName } from './bits';
+import { MODES, MODULES, runOp, useStubLive, type RunResult, type ShowcaseEvent } from './stub';
 
 export const name = 'Console timeline';
 
-type Entry = { t: number; kind: 'run'; runs: RunResult[]; label: string } | { t: number; kind: 'event'; e: ShowcaseEvent };
+type Entry = { ts: number; kind: 'run'; runs: RunResult[]; label: string } | { ts: number; kind: 'event'; e: ShowcaseEvent };
 
 export function VariantC() {
   const { status, events, simulateFailover } = useStubLive();
@@ -16,8 +30,8 @@ export function VariantC() {
   const [opId, setOpId] = useState(mod.ops[0].id);
   const op = mod.ops.find((o) => o.id === opId) ?? mod.ops[0];
   const [input, setInput] = useState(op.input);
-  const [chips, setChips] = useState<Mode[]>(['standalone', 'cluster']);
-  const [history, setHistory] = useState<Array<{ t: number; runs: RunResult[]; label: string }>>([]);
+  const [chips, setChips] = useState<string[]>(['standalone', 'cluster']);
+  const [history, setHistory] = useState<Array<{ ts: number; runs: RunResult[]; label: string }>>([]);
   const [selected, setSelected] = useState<RunResult | null>(null);
   const [showEvents, setShowEvents] = useState(true);
 
@@ -27,108 +41,123 @@ export function VariantC() {
     if (m.onlyMode) setChips([m.onlyMode]);
   };
   const run = () => {
-    const modes = mod.onlyMode ? [mod.onlyMode] : chips;
+    const modes = mod.onlyMode ? [mod.onlyMode] : MODES.filter((m) => chips.includes(m));
     const runs = modes.map((md) => runOp(md, moduleId, op.id, input, status[md]));
-    setHistory((h) => [{ t: Date.now(), runs, label: `${mod.id}.${op.label}(${input})` }, ...h]);
+    setHistory((h) => [{ ts: Date.now(), runs, label: `${mod.id}.${op.label}(${input})` }, ...h]);
     setSelected(runs[0] ?? null);
     if (mod.id === 'failover') simulateFailover();
   };
 
   const timeline = useMemo<Entry[]>(() => {
-    const ev: Entry[] = showEvents ? events.map((e) => ({ t: e.id * -1, kind: 'event' as const, e })) : [];
-    // interleave: runs carry real timestamps, events are newest-first already; merge by arrival order
-    const runs: Entry[] = history.map((h) => ({ ...h, kind: 'run' as const }));
-    const out: Entry[] = []; let i = 0, j = 0;
-    while (i < runs.length || j < ev.length) {
-      if (j >= ev.length || (i < runs.length && i <= j)) out.push(runs[i++]); else out.push(ev[j++]);
-    }
-    return out;
+    const all: Entry[] = [
+      ...history.map((h) => ({ ...h, kind: 'run' as const })),
+      ...(showEvents ? events.map((e) => ({ ts: e.ts, kind: 'event' as const, e })) : []),
+    ];
+    return all.sort((a, b) => b.ts - a.ts);
   }, [history, events, showEvents]);
 
   return (
-    <div className="flex h-screen">
+    <div className="flex h-svh bg-background">
       {/* icon rail */}
-      <nav className="flex w-16 flex-col items-center gap-1 border-r border-zinc-800 bg-zinc-900 py-3">
+      <nav className="flex w-14 shrink-0 flex-col items-center gap-1 border-r bg-sidebar py-3">
+        <Database className="mb-2 size-5 text-muted-foreground" />
         {MODULES.map((m) => (
-          <button key={m.id} onClick={() => pick(m.id)} title={m.label}
-            className={`flex h-11 w-11 flex-col items-center justify-center rounded-lg text-[10px] leading-tight ${moduleId === m.id ? 'bg-sky-600 text-white' : 'text-zinc-400 hover:bg-zinc-800'} ${m.kind === 'mode-specific' ? 'mt-2 ring-1 ring-violet-500/50' : ''}`}>
-            <span className="text-sm font-bold">{m.label.slice(0, 2)}</span>{m.onlyMode?.slice(0, 4)}
-          </button>
+          <Tooltip key={m.id}>
+            <TooltipTrigger asChild>
+              <Button variant={moduleId === m.id ? 'default' : 'ghost'} size="icon-lg" onClick={() => pick(m.id)}
+                className={cn('font-mono text-xs', m.kind === 'mode-specific' && 'mt-1 ring-1 ring-border')}>
+                {m.label.slice(0, 2)}
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent side="right">{m.label}{m.onlyMode && ` · ${m.onlyMode} only`}</TooltipContent>
+          </Tooltip>
         ))}
       </nav>
 
       <div className="flex min-w-0 flex-1 flex-col">
         {/* status strip */}
-        <div className="flex items-center gap-4 border-b border-zinc-800 px-5 py-2 text-xs">
+        <div className="flex shrink-0 items-center gap-2 border-b px-4 py-2">
           {MODES.map((md) => (
-            <span key={md} className="flex items-center gap-2 rounded-full border border-zinc-800 px-3 py-1">
-              <span className={`h-2 w-2 rounded-full ${healthDot[status[md].health]}`} />{md}<span className="font-mono text-zinc-500">{status[md].latencyMs}ms</span>
-              {md === 'sentinel' && <span className={status.sentinel.failoverReady ? 'text-emerald-400' : 'text-rose-400'}>{status.sentinel.failoverReady ? 'failover-ready' : 'not failover-ready'}</span>}
-            </span>
+            <Badge key={md} variant="outline" className="gap-2 py-1">
+              <HealthDot health={status[md].health} /><ModeName mode={md} />
+              <span className="font-mono text-muted-foreground">{status[md].latencyMs}ms</span>
+              {md === 'sentinel' && <span className={status.sentinel.failoverReady ? 'text-success' : 'text-destructive'}>{status.sentinel.failoverReady ? 'failover ready' : 'not failover ready'}</span>}
+            </Badge>
           ))}
-          <label className="ml-auto flex items-center gap-1 text-zinc-500"><input type="checkbox" checked={showEvents} onChange={(e) => setShowEvents(e.target.checked)} /> show events in timeline</label>
+          <div className="ml-auto flex items-center gap-2">
+            <Checkbox id="evts" checked={showEvents} onCheckedChange={(v) => setShowEvents(v === true)} />
+            <Label htmlFor="evts" className="text-xs text-muted-foreground">Events in timeline</Label>
+            <ThemeToggle />
+          </div>
         </div>
 
         {/* composer */}
-        <div className="border-b border-zinc-800 bg-zinc-900/50 px-5 py-4">
+        <div className="shrink-0 space-y-1 border-b bg-muted/30 px-4 py-3">
           <div className="flex items-center gap-2 font-mono text-sm">
-            <span className="text-zinc-500">{mod.label.toLowerCase()}.</span>
-            <select value={op.id} onChange={(e) => { setOpId(e.target.value); setInput(mod.ops.find((o) => o.id === e.target.value)!.input); }} className="rounded bg-zinc-800 px-2 py-1">
-              {mod.ops.map((o) => <option key={o.id} value={o.id}>{o.label}</option>)}
-            </select>
-            <span className="text-zinc-500">(</span>
-            <input value={input} onChange={(e) => setInput(e.target.value)} placeholder={op.placeholder} onKeyDown={(e) => e.key === 'Enter' && run()} className="min-w-0 flex-1 bg-transparent outline-none placeholder:text-zinc-600" />
-            <span className="text-zinc-500">)</span>
-            <span className="text-zinc-500">on</span>
-            {MODES.map((md) => {
-              const on = mod.onlyMode ? mod.onlyMode === md : chips.includes(md);
-              return (
-                <button key={md} disabled={!!mod.onlyMode} onClick={() => setChips(on ? chips.filter((c) => c !== md) : [...chips, md])}
-                  className={`rounded-full px-2.5 py-0.5 text-xs ${on ? 'bg-sky-600 text-white' : 'bg-zinc-800 text-zinc-500'} disabled:cursor-not-allowed`}>{md}</button>
-              );
-            })}
-            <button onClick={run} className="rounded bg-emerald-600 px-3 py-1 text-xs font-semibold text-white">⏎ run</button>
+            <span className="text-muted-foreground">{mod.id}.</span>
+            <Select value={op.id} onValueChange={(v) => { setOpId(v); setInput(mod.ops.find((o) => o.id === v)!.input); }}>
+              <SelectTrigger size="sm" className="w-36 font-mono"><SelectValue /></SelectTrigger>
+              <SelectContent>{mod.ops.map((o) => <SelectItem key={o.id} value={o.id} className="font-mono">{o.label}</SelectItem>)}</SelectContent>
+            </Select>
+            <Input value={input} onChange={(e) => setInput(e.target.value)} placeholder={op.placeholder} onKeyDown={(e) => e.key === 'Enter' && run()} className="h-8 min-w-0 flex-1 font-mono" />
+            <span className="text-muted-foreground">on</span>
+            <ToggleGroup type="multiple" variant="outline" size="sm" value={mod.onlyMode ? [mod.onlyMode] : chips} onValueChange={setChips} disabled={!!mod.onlyMode}>
+              {MODES.map((md) => <ToggleGroupItem key={md} value={md}><ModeName mode={md} /></ToggleGroupItem>)}
+            </ToggleGroup>
+            <Button size="sm" onClick={run}><CornerDownLeft /> Run</Button>
           </div>
-          <div className="mt-1 text-xs text-zinc-500">{mod.blurb}</div>
+          <p className="text-xs text-muted-foreground">{mod.blurb}</p>
         </div>
 
         {/* timeline */}
-        <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4 pb-16">
-          {!timeline.length && <p className="text-sm text-zinc-500">Type an operation and press Enter. Runs and background events pile up here, newest first.</p>}
-          <ol className="space-y-2">
-            {timeline.map((en, idx) => en.kind === 'event' ? (
-              <li key={`e${en.e.id}`} className="flex gap-3 border-l-2 border-amber-500/40 pl-3 font-mono text-[11px]">
-                <span className="text-zinc-600">{en.e.at}</span><span className="text-zinc-400">{en.e.mode}</span><span className={en.e.kind === 'error' ? 'text-rose-300' : 'text-amber-200'}>{en.e.text}</span>
+        <ScrollArea className="min-h-0 flex-1">
+          <ol className="space-y-2 p-4 pb-16">
+            {!timeline.length && <p className="text-sm text-muted-foreground">Type an operation and press Enter. Runs and background events pile up here, newest first.</p>}
+            {timeline.map((en) => en.kind === 'event' ? (
+              <li key={`e${en.e.id}`} className="flex gap-3 border-l-2 border-warning pl-3 font-mono text-[11px]">
+                <span className="text-muted-foreground">{en.e.at}</span><ModeName mode={en.e.mode} />
+                <span className={en.e.kind === 'error' ? 'text-destructive' : 'text-warning'}>{en.e.text}</span>
               </li>
             ) : (
-              <li key={`r${idx}`} className="rounded-lg border border-zinc-800 bg-zinc-900/60 p-3">
-                <div className="mb-2 font-mono text-sm text-zinc-200">{en.label}</div>
-                <div className="space-y-1">
-                  {en.runs.map((r) => (
-                    <button key={r.id} onClick={() => setSelected(r)} className={`flex w-full items-center gap-3 rounded px-2 py-1 text-left font-mono text-xs ${selected?.id === r.id ? 'bg-sky-600/20' : 'hover:bg-zinc-800'}`}>
-                      <span className="w-20 text-zinc-400">{r.mode}</span><StatusBadge code={r.httpStatus} /><span className="w-14 text-zinc-500">{r.latencyMs}ms</span>
-                      <span className="truncate text-zinc-300">{JSON.stringify(r.body)}</span>
-                    </button>
-                  ))}
-                </div>
+              <li key={`r${en.ts}`}>
+                <Card size="sm" className="gap-2">
+                  <CardHeader><CardTitle className="font-mono text-sm">{en.label}</CardTitle></CardHeader>
+                  <CardContent className="space-y-1">
+                    {en.runs.map((r) => (
+                      <Button key={r.id} variant={selected?.id === r.id ? 'secondary' : 'ghost'} size="sm" onClick={() => setSelected(r)} className="w-full justify-start gap-3 font-mono text-xs">
+                        <ModeName mode={r.mode} className="w-20 text-left" /><HttpBadge code={r.httpStatus} />
+                        <span className="w-14 text-muted-foreground">{r.latencyMs}ms</span>
+                        <span className="truncate">{JSON.stringify(r.body)}</span>
+                      </Button>
+                    ))}
+                  </CardContent>
+                </Card>
               </li>
             ))}
           </ol>
-        </div>
+        </ScrollArea>
       </div>
 
       {/* detail pane */}
-      <aside className="w-96 overflow-y-auto border-l border-zinc-800 bg-zinc-900/60 p-4 pb-16">
-        {selected ? (
-          <div className="space-y-4">
-            <div className="flex items-center justify-between"><h3 className="font-semibold">{selected.mode} · {selected.module}.{selected.op}</h3><StatusBadge code={selected.httpStatus} /></div>
-            <Json value={selected.body} />
-            <div><div className="mb-1 text-xs uppercase text-zinc-500">Keys touched</div><KeysTable keys={selected.keys} mode={selected.mode} /></div>
-            <div><div className="mb-1 text-xs uppercase text-zinc-500">Commands</div><Commands r={selected} /></div>
-            <InsightLink mode={selected.mode} />
-            <code className="block break-all rounded bg-black/40 p-2 text-[11px] text-zinc-400">{status[selected.mode].cli}</code>
+      <aside className="w-96 shrink-0 border-l bg-muted/30">
+        <ScrollArea className="h-full">
+          <div className="space-y-4 p-4 pb-16">
+            {selected ? (
+              <>
+                <div className="flex items-center justify-between">
+                  <h3 className="text-sm font-semibold"><ModeName mode={selected.mode} /> · {selected.module}.{selected.op}</h3>
+                  <HttpBadge code={selected.httpStatus} />
+                </div>
+                <Json value={selected.body} />
+                <Separator />
+                <div className="space-y-1"><Label className="text-xs text-muted-foreground">Keys touched</Label><KeysTable keys={selected.keys} mode={selected.mode} /></div>
+                <div className="space-y-1"><Label className="text-xs text-muted-foreground">Commands</Label><Commands r={selected} /></div>
+                <InsightLink mode={selected.mode} />
+                <CliSnippet mode={selected.mode} />
+              </>
+            ) : <p className="text-sm text-muted-foreground">Select a run to inspect its keys, commands and links.</p>}
           </div>
-        ) : <p className="text-sm text-zinc-500">Select a run to inspect its keys, commands and links.</p>}
+        </ScrollArea>
       </aside>
     </div>
   );
