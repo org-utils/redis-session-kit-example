@@ -1,4 +1,4 @@
-// PROTOTYPE: small compositions of shadcn primitives shared by the variants (no layout here).
+// Small compositions of shadcn primitives for showing results and Redis state (no layout here).
 'use client';
 
 import { ExternalLink } from 'lucide-react';
@@ -6,8 +6,8 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { cn } from '@/lib/utils';
-import type { Health, KeyTouched, Mode, RunResult } from './stub';
-import { INITIAL_STATUS, healthDot, modeText } from './stub';
+import type { Health, KeyTouched, Mode, RunResult } from '@/lib/showcase/mock-backend';
+import { INITIAL_STATUS, healthDot, modeText } from '@/lib/showcase/mock-backend';
 
 export function HttpBadge({ code }: { code: number }) {
   if (code >= 500) return <Badge variant="destructive" className="font-mono">{code}</Badge>;

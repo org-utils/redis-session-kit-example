@@ -1,4 +1,5 @@
-// PROTOTYPE: stub data for the UI shell prototype. No backend; everything is fake and in memory.
+// Mock backend: in-memory stand-ins for the Fastify API (mode status, the event log, operation results) until the
+// real backend exists. Everything here is fake; replace with calls to /api/:mode/... and /api/events.
 'use client';
 
 import { useEffect, useRef, useState } from 'react';

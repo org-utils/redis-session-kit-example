@@ -8,7 +8,7 @@ import { cn } from '@/lib/utils';
 const geist = Geist({ subsets: ['latin'], variable: '--font-sans' });
 const geistMono = Geist_Mono({ subsets: ['latin'], variable: '--font-mono' });
 
-export const metadata = { title: 'ioredis-toolkit showcase (prototype)' };
+export const metadata = { title: 'ioredis-toolkit showcase' };
 
 export default function RootLayout({ children }: { children: ReactNode }) {
   return (
