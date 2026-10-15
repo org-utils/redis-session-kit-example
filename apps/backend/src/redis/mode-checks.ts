@@ -1,7 +1,7 @@
 // What the status monitor checks per mode: the mode client's own `health()`, plus on sentinel what every sentinel says
-// and on cluster `cluster_state` and the slot map. The package's facade has no SENTINEL or CLUSTER commands, so those
-// extras come from small probe connections of our own, one per sentinel or seed node.
-import type { ClusterStatus, Mode, SentinelStatus } from '@showcase/contracts';
+// (and each data node's own ROLE) and on cluster `cluster_state` and the slot map. The package's facade has no SENTINEL
+// or CLUSTER commands, so those extras come from small probe connections of our own, one per sentinel, data or seed node.
+import type { ClusterStatus, Mode, SentinelNode, SentinelStatus } from '@showcase/contracts';
 import { Redis } from 'ioredis';
 import type { RedisClient } from 'ioredis-toolkit';
 import type { Config } from '../config/index.ts';
@@ -28,7 +28,28 @@ function probe({ host, port }: Address): Redis {
   return redis;
 }
 
-async function sentinelStatus(sentinels: Redis[], addresses: Address[], name: string): Promise<SentinelStatus> {
+/** A replica's `ROLE` reply: `['slave', masterHost, masterPort, linkState, offset]`; a master's starts with `'master'`. */
+type RoleReply = [role: string, ...rest: unknown[]];
+
+async function nodeRole(address: string, probeOf: (address: string) => Redis): Promise<SentinelNode> {
+  try {
+    const [role, host, port, linkState] = (await probeOf(address).call('ROLE')) as RoleReply;
+    return role === 'slave' ? { address, role, masterAddress: `${host}:${port}`, linkState: String(linkState) } : { address, role };
+  } catch (error) {
+    return { address, role: null, error: message(error) };
+  }
+}
+
+/**
+ * What the sentinels say, then each data node they named (now or earlier: an old master stays listed) asked for its own
+ * ROLE, so the window where two nodes both say master shows.
+ */
+async function sentinelStatus(
+  sentinels: Redis[],
+  addresses: Address[],
+  name: string,
+  dataNodes: { seen: Set<string>; probeOf: (address: string) => Redis },
+): Promise<SentinelStatus> {
   const answers = await Promise.all(
     sentinels.map((sentinel) =>
       Promise.allSettled([
@@ -53,8 +74,13 @@ async function sentinelStatus(sentinels: Redis[], addresses: Address[], name: st
       ...(failed && { error: message(failed.reason) }),
     };
   });
+  const master = reports.find((r) => r.master)?.master ?? null;
+  if (master) dataNodes.seen.add(master);
+  for (const r of reports) for (const replica of r.replicas) dataNodes.seen.add(replica.address);
+  const nodes = await Promise.all([...dataNodes.seen].sort().map((address) => nodeRole(address, dataNodes.probeOf)));
   return {
-    master: reports.find((r) => r.master)?.master ?? null,
+    master,
+    nodes,
     sentinels: reports.map(({ master: _, ...report }) => report),
     failoverReady: reports.every(
       (r) => r.quorumOk && r.replicas.some((replica) => replica.flags === 'slave' && replica.masterLinkStatus === 'ok'),
@@ -96,10 +122,23 @@ export function createModeChecks(clients: ModeClients, config: Config): ModeChec
   for (const [mode, client] of clients) {
     if (mode === 'sentinel') {
       const sentinels = open(config.REDIS_SENTINELS);
+      const nodeProbes = new Map<string, Redis>();
+      const dataNodes = {
+        seen: new Set<string>(),
+        probeOf(address: string) {
+          let node = nodeProbes.get(address);
+          if (!node) {
+            const [host, port] = address.split(':');
+            [node] = open([{ host, port: Number(port) }]);
+            nodeProbes.set(address, node);
+          }
+          return node;
+        },
+      };
       checks.set(mode, async () => {
         const [modeHealth, sentinel] = await Promise.all([
           health(client),
-          sentinelStatus(sentinels, config.REDIS_SENTINELS, config.REDIS_SENTINEL_NAME),
+          sentinelStatus(sentinels, config.REDIS_SENTINELS, config.REDIS_SENTINEL_NAME, dataNodes),
         ]);
         return { health: modeHealth, sentinel };
       });

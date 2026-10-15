@@ -39,7 +39,7 @@ import { StreamsSection } from './streams-section';
 export function ShowcaseShell({ initialStatus }: { initialStatus: StatusResponse | null }) {
   // ?module=<id> opens a section directly; the showcase opens on Session.
   const params = useSearchParams();
-  const { status, events, stream } = useLive(initialStatus);
+  const { status, sentinel, events, stream } = useLive(initialStatus);
   const [moduleId, setModuleId] = useState(MODULES.some((m) => m.id === params.get('module')) ? params.get('module')! : 'session');
   // A mode-specific module opened by ?module= starts on its one mode, as picking it in the sidebar does.
   const [mode, setMode] = useState<Mode>(() => MODULES.find((m) => m.id === moduleId)?.onlyMode ?? 'standalone');
@@ -191,7 +191,7 @@ export function ShowcaseShell({ initialStatus }: { initialStatus: StatusResponse
               {moduleId === 'session' ? (
                 <SessionSection mode={mode} resets={resets} onResult={(r) => setResults([r])} />
               ) : moduleId === 'failover' ? (
-                <FailoverSection />
+                <FailoverSection sentinel={sentinel} onResult={(r) => setResults([r])} />
               ) : moduleId === 'slots' ? (
                 <SlotsSection onResult={(r) => setResults([r])} />
               ) : moduleId === 'lock' ? (
@@ -282,7 +282,7 @@ export function ShowcaseShell({ initialStatus }: { initialStatus: StatusResponse
                 {events.map((e) => (
                   <li key={e.id} className="flex gap-3 py-0.5">
                     <span className="text-muted-foreground">{new Date(e.ts).toLocaleTimeString()}</span><ModeName mode={e.mode} className="w-20" />
-                    <span className={e.kind === 'error' ? 'text-destructive' : e.kind === 'showcase' ? 'text-muted-foreground' : 'text-warning'}>
+                    <span className={e.kind === 'error' ? 'text-destructive' : e.kind === 'showcase' ? 'text-muted-foreground' : e.kind === 'sentinel' ? 'text-code-key' : 'text-warning'}>
                       {e.source}{e.channel && ` · ${e.channel}`}{e.code && ` · ${e.code}`}: {e.message}
                     </span>
                   </li>

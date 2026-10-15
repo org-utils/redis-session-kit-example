@@ -1,7 +1,7 @@
 // Builds the Fastify app without listening, so tests can drive it with inject().
 import Fastify, { type FastifyReply, type FastifyServerOptions } from 'fastify';
 import { type FastifyPluginAsyncZod, serializerCompiler, validatorCompiler } from 'fastify-type-provider-zod';
-import type { Mode } from '@showcase/contracts';
+import type { EventLogEntry, Mode } from '@showcase/contracts';
 import type { KeyManager, RedisClient } from 'ioredis-toolkit';
 import type { Config } from './config/index.ts';
 import { ModeUnavailableError, registerErrorHandling } from './http/errors.ts';
@@ -11,8 +11,9 @@ import { createEventLog, type NewEntry } from './redis/event-log.ts';
 import { createModeChecks } from './redis/mode-checks.ts';
 import { closeModeClients, connectionConfig, createModeClients, sessionKeyManager } from './redis/mode-clients.ts';
 import { startTrace, type TraceRecording } from './redis/redis-trace.ts';
+import { watchAnnouncements } from './redis/sentinels.ts';
 import { createSessionMetrics, type SessionMetricsSink } from './redis/session-metrics.ts';
-import { createStatusMonitor } from './redis/status-monitor.ts';
+import { createStatusMonitor, type StatusMonitor } from './redis/status-monitor.ts';
 import { createTemporaryClients, type TemporaryClients } from './redis/temporary-clients.ts';
 import { cacheModule } from './modules/cache/plugin.ts';
 import { clientModule } from './modules/client/plugin.ts';
@@ -22,6 +23,7 @@ import { rateLimitModule } from './modules/rate-limit/plugin.ts';
 import { sessionModule } from './modules/session/plugin.ts';
 import { streamsModule } from './modules/streams/plugin.ts';
 import { slotsModule } from './modules/slots/plugin.ts';
+import { failoverModule } from './modules/failover/plugin.ts';
 
 /**
  * A feature module: registered once per mode under `/api/<mode>/<name>`, given that mode's client (and a factory for
@@ -39,17 +41,24 @@ export type FeatureModule = FastifyPluginAsyncZod<{
   sessionKeys: KeyManager;
 }>;
 
-/** One mode's event log, for what a feature module notices in the background. */
+/** One mode's event log: what a module notices in the background, and what the mode reports while it runs. */
 export interface ModeEvents {
   append(entry: NewEntry): void;
+  /** Calls `listener` with each new entry on this mode until the returned function is called. */
+  subscribe(listener: (entry: EventLogEntry) => void): () => void;
 }
 
 /**
  * A mode-specific module: registered on one mode only, under `/api/<mode>/<name>`, for behaviour only that mode has
- * (cluster slots, sentinel failover). Besides that mode's client and event log, it sees the config, for the addresses
- * its own connections to Redis need.
+ * (cluster slots, sentinel failover). Besides that mode's client and event log, it sees the status monitor, and the
+ * config for the addresses its own connections to Redis need.
  */
-export type ModeSpecificModule = FastifyPluginAsyncZod<{ client: RedisClient; events: ModeEvents; config: Config }>;
+export type ModeSpecificModule = FastifyPluginAsyncZod<{
+  client: RedisClient;
+  events: ModeEvents;
+  monitor: StatusMonitor;
+  config: Config;
+}>;
 
 declare module 'fastify' {
   interface FastifyRequest {
@@ -72,6 +81,7 @@ export const FEATURE_MODULES: Record<string, FeatureModule> = {
 /** The mode-specific modules by mode, then by name (their path segment). */
 export const MODE_SPECIFIC_MODULES: Partial<Record<Mode, Record<string, ModeSpecificModule>>> = {
   cluster: { slots: slotsModule },
+  sentinel: { failover: failoverModule },
 };
 
 export interface AppOptions {
@@ -104,13 +114,23 @@ export async function buildApp({
   });
   const modeChecks = createModeChecks(clients, config);
   const monitor = createStatusMonitor({ checks: modeChecks.checks, eventLog });
+  let announcements: { close(): void } | undefined;
 
   // The first check runs before the app answers, so /api/status and the 503 guard start from real results.
   app.addHook('onReady', async () => {
     await monitor.refresh();
     monitor.start();
+    // What Sentinel announces goes into the sentinel event log, whoever caused it (a drill, redis-cli…); a new master
+    // refreshes the status at once instead of at the next check.
+    if (clients.has('sentinel')) {
+      announcements = watchAnnouncements(config.REDIS_SENTINELS, (channel, message) => {
+        eventLog.append('sentinel', { kind: 'sentinel', source: channel, message });
+        if (channel === '+switch-master') void monitor.refresh();
+      });
+    }
   });
   app.addHook('onClose', async () => {
+    announcements?.close();
     monitor.stop();
     modeChecks.close();
     await closeModeClients(clients);
@@ -147,7 +167,10 @@ export async function buildApp({
           const setCookie = reply.getHeader('set-cookie');
           return JSON.stringify({ result, redis, ...(typeof setCookie === 'string' && { setCookie }) });
         });
-        const events: ModeEvents = { append: (entry) => eventLog.append(mode, entry) };
+        const events: ModeEvents = {
+          append: (entry) => eventLog.append(mode, entry),
+          subscribe: (listener) => eventLog.subscribe((entry) => entry.mode === mode && listener(entry)),
+        };
         for (const [name, module] of Object.entries(modules)) {
           await scope.register(module, {
             client, temporaryClients, events, sessionMetrics: sessionMetrics.get(mode)!, sessionKeys,
@@ -155,7 +178,7 @@ export async function buildApp({
           });
         }
         for (const [name, module] of Object.entries(modeModules[mode] ?? {})) {
-          await scope.register(module, { client, events, config, prefix: `/${name}` });
+          await scope.register(module, { client, events, monitor, config, prefix: `/${name}` });
         }
       },
       { prefix: `/api/${mode}` },

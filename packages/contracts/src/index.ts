@@ -38,7 +38,24 @@ export const SentinelStatusSchema = z.object({
   ),
   /** Every sentinel reaches quorum and sees a replica up with its link to the master ok (upstream's Docker health check). */
   failoverReady: z.boolean(),
+  /**
+   * What each data node says about itself (`ROLE`), every node Sentinel has named since the backend started, by
+   * address. After a failover the old master can say `master` for a while although Sentinel says otherwise.
+   */
+  nodes: z.array(
+    z.object({
+      address: z.string(),
+      /** `master` or `slave`, or null when the node did not answer (down, or paused by `CLIENT PAUSE`). */
+      role: z.string().nullable(),
+      /** A replica's master, `host:port`. */
+      masterAddress: z.string().optional(),
+      /** A replica's link to its master: `connect`, `connecting`, `sync` or `connected`. */
+      linkState: z.string().optional(),
+      error: z.string().optional(),
+    }),
+  ),
 });
+export type SentinelNode = SentinelStatus['nodes'][number];
 export type SentinelStatus = z.infer<typeof SentinelStatusSchema>;
 
 export const ClusterStatusSchema = z.object({
@@ -73,10 +90,10 @@ export const EventLogEntrySchema = z.object({
   /**
    * `error`: something a mode client reported through `onError`. `health`: the mode's health changed. `showcase`:
    * something the showcase noticed that the package does not report (a release inside `lock.using()` that found the
-   * lease already gone).
+   * lease already gone). `sentinel`: what Sentinel announced (`+switch-master`, …), sentinel mode only.
    */
-  kind: z.enum(['error', 'health', 'showcase']),
-  /** The `onError` source (`connection`, `subscriber`, …), or `health`. */
+  kind: z.enum(['error', 'health', 'showcase', 'sentinel']),
+  /** The `onError` source (`connection`, `subscriber`, …), `health`, or Sentinel's channel (`+switch-master`, …). */
   source: z.string(),
   /** The package's error code, when the error has one (`PUBSUB_SERIALIZATION`, …). */
   code: z.string().optional(),
@@ -478,6 +495,76 @@ export const SlotsOverviewSchema = z.object({
   ),
 });
 export type SlotsOverview = z.infer<typeof SlotsOverviewSchema>;
+
+/* ───────────── failover (sentinel only): POST /api/sentinel/failover/<operation> ───────────── */
+
+/**
+ * How the master goes away. `graceful`: `SENTINEL FAILOVER` to the first reachable sentinel. `unresponsive`:
+ * `CLIENT PAUSE <pauseMs> ALL` to the current master, so the sentinels see it as down.
+ */
+export const FailoverKindSchema = z.enum(['graceful', 'unresponsive']);
+export type FailoverKind = z.infer<typeof FailoverKindSchema>;
+export const FailoverTriggerRequestSchema = z.object({
+  kind: FailoverKindSchema,
+  /** `unresponsive` only; 8000 when left out. */
+  pauseMs: z.number().int().min(1000).max(20_000).optional(),
+});
+/** What the trigger sent, where, and the reply. Not a package call: the package has no failover command. */
+export const FailoverTriggerResultSchema = z.object({
+  kind: FailoverKindSchema,
+  command: z.string(),
+  /** The sentinel or master it went to, `host:port`. */
+  sentTo: z.string(),
+  reply: z.string(),
+  /** The master before the trigger, as Sentinel named it. */
+  from: z.string(),
+});
+export type FailoverTriggerResult = z.infer<typeof FailoverTriggerResultSchema>;
+
+/* ───────────── failover drill: POST /api/sentinel/failover/drills, GET …/drills/:id/stream ───────────── */
+
+/** What a drill check found: `kept` survived, `lost` did not, `unknown` could not be told. */
+export const DrillCheckSchema = z.object({
+  label: z.string(),
+  outcome: z.enum(['kept', 'lost', 'unknown']),
+  detail: z.string(),
+});
+export type DrillCheck = z.infer<typeof DrillCheckSchema>;
+
+/**
+ * One SSE `data:` payload on a drill's stream; `t` is milliseconds since the drill started. A late listener gets every
+ * event so far, then the live ones; the stream ends after `end`.
+ */
+export const DrillEventSchema = z.discriminatedUnion('kind', [
+  /** A setup step: the lock, the session, the stream group and its blocked read, the subscription. */
+  z.object({ kind: z.literal('setup'), t: z.number(), text: z.string() }),
+  /** The failover itself: what was sent, where, and the reply. */
+  z.object({ kind: z.literal('trigger'), t: z.number(), text: z.string() }),
+  /** Something Sentinel announced. */
+  z.object({ kind: z.literal('sentinel'), t: z.number(), channel: z.string(), message: z.string() }),
+  /**
+   * One workload call on the sentinel mode client. `node` is where it was answered; `stale` when that was the old master
+   * after Sentinel had switched away from it.
+   */
+  z.object({
+    kind: z.literal('call'),
+    t: z.number(),
+    op: z.string(),
+    latencyMs: z.number(),
+    ok: z.boolean(),
+    node: z.string().nullable(),
+    stale: z.boolean(),
+    error: z.string().optional(),
+  }),
+  /** Something the sentinel mode client reported through `onError` while the drill ran. */
+  z.object({ kind: z.literal('onError'), t: z.number(), source: z.string(), message: z.string() }),
+  /** The drill could not go on (setup or the trigger failed); `end` follows. */
+  z.object({ kind: z.literal('failed'), t: z.number(), message: z.string() }),
+  /** What survived, then the stream ends. Empty checks when the drill failed before it could check. */
+  z.object({ kind: z.literal('end'), t: z.number(), checks: z.array(DrillCheckSchema) }),
+]);
+export type DrillEvent = z.infer<typeof DrillEventSchema>;
+export const DrillParamsSchema = z.object({ id: z.string() });
 
 /* ───────────── errors: every non-2xx response ───────────── */
 

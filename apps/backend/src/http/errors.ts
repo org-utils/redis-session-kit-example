@@ -23,6 +23,18 @@ export class ModeUnavailableError extends Error {
   }
 }
 
+/** A refusal of the showcase's own (not the package's), with its status and code: `409 DRILL_IN_PROGRESS`, … */
+export class ShowcaseError extends Error {
+  readonly status: number;
+  readonly code: string;
+  constructor(status: number, code: string, message: string) {
+    super(message);
+    this.name = 'ShowcaseError';
+    this.status = status;
+    this.code = code;
+  }
+}
+
 /** Status codes for the package's error codes. Anything not listed is a 500. */
 function packageStatus(code: string): number {
   if (code.endsWith('_INPUT')) return 400;
@@ -48,6 +60,7 @@ const isPipelineSlots = (error: Error) => error.message === 'All keys in the pip
 function toResponse(error: FastifyError | Error, mode: Mode | null): { status: number; body: ErrorBody } {
   const body = (code: string, name = error.name) => ({ error: { code, name, message: error.message, mode } });
   if (error instanceof ModeUnavailableError) return { status: 503, body: body(error.code) };
+  if (error instanceof ShowcaseError) return { status: error.status, body: body(error.code) };
   // A package error names its class: every session error's `name` is SessionError, but its class says which
   // (SessionReplayError…).
   if (error instanceof RedisToolkitError) {

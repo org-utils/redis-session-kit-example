@@ -39,6 +39,15 @@ test('sentinel: the master, quorum on every sentinel, the replica in sync and fa
   assert.equal(sentinel.failoverReady, true);
 });
 
+test('sentinel: each data node says its own ROLE; the one that says master is the master Sentinel names', () => {
+  const { master, nodes } = of('sentinel').sentinel!;
+  assert.deepEqual(nodes.map((n) => n.address), ['127.0.0.1:6380', '127.0.0.1:6381']);
+  const own = nodes.find((n) => n.role === 'master')!;
+  const replica = nodes.find((n) => n.role === 'slave')!;
+  assert.equal(own.address, master);
+  assert.deepEqual([replica.masterAddress, replica.linkState], [master, 'connected']);
+});
+
 test('cluster: cluster_state ok and slot ranges covering all 16384 slots across the 3 masters', () => {
   const cluster = of('cluster').cluster!;
   assert.equal(cluster.state, 'ok');
