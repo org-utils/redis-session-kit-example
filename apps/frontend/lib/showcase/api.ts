@@ -36,6 +36,9 @@ export async function runOperation(mode: Mode, module: string, op: string, reque
     const message = error instanceof Error ? error.message : String(error);
     return { ...base, input: '', httpStatus: 0, latencyMs: 0, body: { error: { code: 'NOT_SENT', message } } };
   }
+  // A raw command runs through one route (`client/raw`); its card is titled with the command it ran.
+  const command = (body as { command?: unknown } | null)?.command;
+  if (typeof command === 'string') base.op = command;
   const started = performance.now();
   try {
     const res = await fetch(`/api/${mode}/${module}/${op}`, {

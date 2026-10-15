@@ -35,11 +35,18 @@ function packageStatus(code: string): number {
 /** ioredis's ReplyError: Redis itself answered with an error (`CROSSSLOT …`, `NOGROUP …`, `MOVED …`). */
 const isRedisReply = (error: Error) => error.name === 'ReplyError';
 
+/**
+ * ioredis refusing a cluster pipeline whose keys span slots, before sending anything. Not Redis's error, but the same
+ * lesson as CROSSSLOT, so it answers alike: 502 with ioredis's own message.
+ */
+const isPipelineSlots = (error: Error) => error.message === 'All keys in the pipeline should belong to the same slots allocation group';
+
 function toResponse(error: FastifyError | Error, mode: Mode | null): { status: number; body: ErrorBody } {
   const body = (code: string) => ({ error: { code, name: error.name, message: error.message, mode } });
   if (error instanceof ModeUnavailableError) return { status: 503, body: body(error.code) };
   if (error instanceof RedisToolkitError) return { status: packageStatus(error.code), body: body(error.code) };
   if (isRedisReply(error)) return { status: 502, body: body(error.message.split(' ', 1)[0]) };
+  if (isPipelineSlots(error)) return { status: 502, body: body('PIPELINE_SLOTS') };
   // Fastify's own client errors (validation, malformed body…) keep their status and code.
   const { statusCode, code } = error as FastifyError;
   if (statusCode && statusCode < 500) return { status: statusCode, body: body(code ?? 'BAD_REQUEST') };

@@ -4,7 +4,7 @@
   "type": "module",
   "scripts": {
     "dev": "node --watch --env-file-if-exists=.env src/server.ts",
-    "test": "node --test 'src/**/*.test.ts'",
+    "test": "node --test --test-concurrency=1 'src/**/*.test.ts'",
     "typecheck": "tsc"
   },
   "dependencies": {

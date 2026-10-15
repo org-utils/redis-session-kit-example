@@ -12,6 +12,7 @@ import { closeModeClients, createModeClients } from './redis/mode-clients.ts';
 import { startTrace, type TraceRecording } from './redis/redis-trace.ts';
 import { createStatusMonitor } from './redis/status-monitor.ts';
 import { cacheModule } from './modules/cache/plugin.ts';
+import { clientModule } from './modules/client/plugin.ts';
 
 /**
  * A feature module: registered once per mode under `/api/<mode>/<name>`, given that mode's client, and never told
@@ -27,7 +28,7 @@ declare module 'fastify' {
 }
 
 /** The feature modules by name, which is also their path segment. */
-export const FEATURE_MODULES: Record<string, FeatureModule> = { cache: cacheModule };
+export const FEATURE_MODULES: Record<string, FeatureModule> = { client: clientModule, cache: cacheModule };
 
 export interface AppOptions {
   config: Config;
