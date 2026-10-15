@@ -1,10 +1,10 @@
-// PROTOTYPE (throwaway): an in-memory failover drill for the failover section prototype. It replays the timings
-// measured against the upstream sentinel stack (see the resolution of "Mode-specific modules: what the failover and
-// cluster demos show"), sped up 4x. Module outcomes for "Unresponsive master" are guesses until the real backend runs.
+// Mock failover drill: an in-memory stand-in for POST /api/sentinel/failover/drills and its SSE stream until the real
+// backend exists. It replays the timings measured against the upstream sentinel stack (see the resolution of
+// "Mode-specific modules: what the failover and cluster demos show"), sped up 4x. Module outcomes for "Unresponsive
+// master" are guesses until the real backend runs.
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import type { OpSpec } from './examples';
 
 export type Port = '6380' | '6381';
 export type DrillKind = 'graceful' | 'unresponsive';
@@ -25,20 +25,6 @@ export const SPEED = 4;
 export const WINDOW_MS = 45_000;
 const other = (p: Port): Port => (p === '6380' ? '6381' : '6380');
 const OPS = ['cache.set', 'rateLimiter.consume', 'sessions.validate', 'pubsub.publish'];
-
-export const DRILL_SPEC: OpSpec = {
-  fields: [
-    { name: 'kind', label: 'how the master goes away', kind: 'select', options: ['graceful', 'unresponsive'] },
-    { name: 'pauseMs', label: 'pause (ms, unresponsive only)', kind: 'number' },
-  ],
-  examples: [
-    { id: 'graceful', title: 'Graceful failover', description: 'SENTINEL FAILOVER: the replica is promoted and the package carries on without a single error.', values: { kind: 'graceful', pauseMs: '' } },
-    { id: 'unresponsive', title: 'Unresponsive master', description: 'CLIENT PAUSE 8000 ALL on the master: calls stall, onError fires, and for ~10 s two nodes both think they are master.', values: { kind: 'unresponsive', pauseMs: 8000 } },
-  ],
-  call: (v) => (v.kind === 'unresponsive'
-    ? `CLIENT PAUSE ${v.pauseMs || 8000} ALL   // sent to the current master by the showcase, not the package`
-    : 'SENTINEL FAILOVER mymaster   // sent to 127.0.0.1:26379 by the showcase, not the package'),
-};
 
 /** Builds the whole timeline up front; the hook reveals it as time passes. */
 function script(kind: DrillKind, from: Port, withWorkload: boolean, pauseMs: number) {

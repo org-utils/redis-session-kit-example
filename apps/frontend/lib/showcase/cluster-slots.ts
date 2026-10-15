@@ -1,6 +1,5 @@
-// PROTOTYPE (throwaway): stub data for the slots section prototype. Slots are real (CRC16 of the hashed part); the
-// node overview and the run results are made up. The real backend asks Redis (CLUSTER KEYSLOT, CLUSTER SHARDS).
-import type { OpSpec } from './examples';
+// Mock cluster data for the slots section until the real backend exists. Slots are real (CRC16 of the hashed part);
+// the node overview and the run results are made up. The real backend asks Redis (CLUSTER KEYSLOT, CLUSTER SHARDS).
 import { nodeOf, slotOf } from './mock-backend';
 
 export const NODES = [
@@ -8,17 +7,6 @@ export const NODES = [
   { address: '127.0.0.1:7002', port: '7002', from: 5461, to: 10922 },
   { address: '127.0.0.1:7003', port: '7003', from: 10923, to: 16383 },
 ];
-
-export const INSPECT_SPEC: OpSpec = {
-  fields: [{ name: 'keys', label: 'keys (one per line or comma separated)', kind: 'json' }],
-  examples: [
-    { id: 'plain', title: 'Related keys, no hash tag', description: 'The whole key is hashed, so one user\'s keys scatter across slots and nodes.', values: { keys: 'user:42:profile, user:42:cart, user:42:orders' } },
-    { id: 'tag', title: 'Same keys with a hash tag', description: 'Only {user:42} is hashed: one slot, so multi-key commands are atomic.', values: { keys: '{user:42}:profile, {user:42}:cart, {user:42}:orders' } },
-    { id: 'session', title: 'How sessions place a user\'s keys', description: 'Record and session set share {sha256(userId)}; each token locator lands in its own slot.', values: { keys: 'showcase:session:session:{a3f9c21e}:9be1, showcase:session:user-sessions:{a3f9c21e}, showcase:session:token-index:9be1, showcase:session:token-index:41c7' } },
-    { id: 'empty', title: 'An empty hash tag', description: '{} hashes nothing, so Redis hashes the whole key: foo{}bar and foo{}baz differ.', values: { keys: 'foo{}bar, foo{}baz' } },
-  ],
-  call: (v) => `CLUSTER KEYSLOT <key>  ×${parseKeys(String(v.keys)).length}   // the showcase asks Redis; the package's slot helpers aren't public`,
-};
 
 export function parseKeys(s: string): string[] {
   return s.split(/[\n,]/).map((k) => k.trim()).filter(Boolean);
