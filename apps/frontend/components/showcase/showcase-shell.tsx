@@ -27,11 +27,14 @@ import { RequestForm } from './request-form';
 import { CliSnippet, Commands, HttpBadge, InsightLink, Json, KeysTable, ModeName } from './result-display';
 import { FailoverSection } from './failover-section';
 import { SessionSection } from './session-section';
+import { VariantSwitcher, useVariant } from '@/components/prototype/variant-switcher';
+import { LIVE_MODULES, LIVE_VARIANTS, LivePanesPrototype } from './live-panes.prototype';
 import { SlotsSection } from './slots-section';
 
 export function ShowcaseShell() {
   // ?module=<id> opens a section directly.
   const params = useSearchParams();
+  const variant = useVariant(['A', 'B', 'C']); // PROTOTYPE: live panes variants
   const { status, events } = useStubLive();
   const [mode, setMode] = useState<Mode>('standalone');
   const [moduleId, setModuleId] = useState(MODULES.some((m) => m.id === params.get('module')) ? params.get('module')! : 'cache');
@@ -161,6 +164,8 @@ export function ShowcaseShell() {
                 <FailoverSection />
               ) : moduleId === 'slots' ? (
                 <SlotsSection />
+              ) : LIVE_MODULES.includes(moduleId) ? (
+                <><LivePanesPrototype module={moduleId} mode={mode} variant={variant} /><VariantSwitcher variants={LIVE_VARIANTS} /></>
               ) : (<>
               <Tabs value={op.id} onValueChange={(v) => loadOp(moduleId, v)}>
                 <TabsList variant="line">
