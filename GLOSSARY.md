@@ -17,7 +17,7 @@ The single package client the backend holds for one connection mode, shared by e
 _Avoid_: connection, redis instance, shared client
 
 **Event log**:
-The recent record, per connection mode, of what happened in the background (failures the package reports outside any request, and health changes), shown live in the showcase.
+The recent record, per connection mode, of what happened in the background (failures the package reports outside any request, health changes, and on sentinel what Sentinel announces, such as a master switch), shown live in the showcase.
 _Avoid_: error log, activity feed, notifications
 
 **Feature module**:
@@ -31,6 +31,10 @@ _Avoid_: preset, template, scenario, recipe
 **Token wallet**:
 Every session credential the showcase has handed one browser for one connection mode, kept so a visitor can present an old credential again (to replay it or log out with it).
 _Avoid_: token history, token list, keychain
+
+**Failover drill**:
+A failover the showcase triggers on sentinel while a fixed workload of feature module calls runs against it, followed by checks of what survived (a held lock, a session, a stream group, a subscription).
+_Avoid_: failover test, experiment, scenario
 
 **Mode-specific module**:
 A part of the showcase that demonstrates behaviour only one connection mode has, such as sentinel failover or cluster hash-slot routing.
