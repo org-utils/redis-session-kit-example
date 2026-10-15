@@ -1,9 +1,8 @@
-// PROTOTYPE (throwaway): in-memory simulators and operation specs for the lock, rate-limit, pub/sub and streams live
-// panes, following the catalogue settled in "Examples: settle the built-in examples…". Behaviour is simplified.
+// Mock modules for the lock, rate-limit, pub/sub and streams sections: in-memory stand-ins for their /api/:mode/...
+// routes and SSE streams until the real backend exists. Behaviour is simplified (e.g. a denied consume doesn't count).
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import type { OpSpec, Values } from './examples';
 import type { Mode } from './mock-backend';
 
 const rnd = (n = 6) => Math.random().toString(36).slice(2, 2 + n);
@@ -59,43 +58,6 @@ export function useLockSim() {
   return { lease: live, now, tokens, log, acquire, extend, release, using };
 }
 
-export const LOCK_OPS: Record<string, OpSpec> = {
-  acquire: {
-    fields: [{ name: 'lane', label: 'holder', kind: 'select', options: ['A', 'B'] }, { name: 'name', label: 'name', kind: 'text' }, { name: 'ttl', label: 'ttl (seconds)', kind: 'number' }],
-    examples: [
-      { id: 'a', title: 'Nightly report job (A)', description: 'A 30 s lease from holder A.', values: { lane: 'A', name: 'report:nightly', ttl: 30 } },
-      { id: 'b', title: '…then from B', description: 'Refused while A holds it, but B still gets a token.', values: { lane: 'B', name: 'report:nightly', ttl: 30 } },
-      { id: 'short', title: 'Sub-second lease', description: 'TTLs may be fractional.', values: { lane: 'A', name: 'report:nightly', ttl: 0.5 } },
-      { id: 'limit', title: 'Over maxTtl', description: '600 s → LOCK_LIMIT.', values: { lane: 'A', name: 'migration', ttl: 600 } },
-    ],
-    call: (v) => `await redis.lock.acquire('${v.name}', ${v.ttl})   // holder ${v.lane}`,
-  },
-  extend: {
-    fields: [{ name: 'lane', label: 'holder', kind: 'select', options: ['A', 'B'] }, { name: 'token', label: 'token', kind: 'token' }, { name: 'ttl', label: 'ttl (seconds)', kind: 'number' }],
-    examples: [
-      { id: 'mine', title: 'Extend my lease', description: 'Resets the lease to ttl; it does not add to it.', values: { lane: 'A', token: '$A', ttl: 30 } },
-      { id: 'refused', title: 'With the refused token', description: 'B\'s token from a refused acquire → false.', values: { lane: 'B', token: '$B', ttl: 30 } },
-    ],
-    call: (v) => `await redis.lock.extend('report:nightly', token, ${v.ttl})`,
-  },
-  release: {
-    fields: [{ name: 'lane', label: 'holder', kind: 'select', options: ['A', 'B'] }, { name: 'token', label: 'token', kind: 'token' }],
-    examples: [
-      { id: 'mine', title: 'With my token', description: 'Compare-and-delete → true.', values: { lane: 'A', token: '$A' } },
-      { id: 'theirs', title: 'With the other lane\'s token', description: '→ false; the lock survives.', values: { lane: 'B', token: '$B' } },
-    ],
-    call: () => `await redis.lock.release('report:nightly', token)`,
-  },
-  using: {
-    fields: [{ name: 'lane', label: 'holder', kind: 'select', options: ['A', 'B'] }, { name: 'work', label: 'work (seconds)', kind: 'number' }, { name: 'ttl', label: 'ttl (seconds)', kind: 'number' }],
-    examples: [
-      { id: 'hold', title: 'Hold for 10 s', description: 'The other lane is refused meanwhile; a second using → LOCK_HELD.', values: { lane: 'A', work: 10, ttl: 30 } },
-      { id: 'outlast', title: 'Work outlasts the lease', description: 'work 8 s, ttl 3: B can acquire mid-work; the release fails into the event log.', values: { lane: 'A', work: 8, ttl: 3 } },
-    ],
-    call: (v) => `await redis.lock.using('report:nightly', async () => work(${v.work}s), ${v.ttl})`,
-  },
-};
-
 /* ───────────── rate limit: 10 per 20 s ───────────── */
 export const RL = { limit: 10, windowS: 20 };
 export interface RateResult { allowed: boolean; limit: number; remaining: number; resetAt: number; retryAfterSeconds: number; count: number }
@@ -124,37 +86,6 @@ export function useRateSim() {
   return { win: active, now, log, consume, check, reset, burst };
 }
 
-export const RATE_OPS: Record<string, OpSpec> = {
-  consume: {
-    fields: [{ name: 'subject', label: 'subject', kind: 'text' }, { name: 'cost', label: 'cost', kind: 'number' }],
-    examples: [
-      { id: 'one', title: 'One request', description: 'remaining goes down by one.', values: { subject: 'user:42', cost: 1 } },
-      { id: 'four', title: 'Expensive request', description: 'Costs 4 of the window at once.', values: { subject: 'user:42', cost: 4 } },
-      { id: 'big', title: 'Bigger than the window', description: 'cost 11 > limit 10 → denied.', values: { subject: 'user:42', cost: 11 } },
-      { id: 'bad', title: 'Invalid cost', description: '0 → RATE_LIMIT_INPUT.', values: { subject: 'user:42', cost: 0 } },
-    ],
-    call: (v) => `await redis.rateLimiter.consume('${v.subject}', ${v.cost})`,
-  },
-  check: {
-    fields: [{ name: 'subject', label: 'subject', kind: 'text' }],
-    examples: [
-      { id: 'peek', title: 'Peek without consuming', description: 'Count unchanged.', values: { subject: 'user:42' } },
-      { id: 'limit', title: 'At exactly the limit', description: 'After filling to 10: consume allowed the 10th, check says denied.', values: { subject: 'user:42' } },
-    ],
-    call: (v) => `await redis.rateLimiter.check('${v.subject}')`,
-  },
-  reset: {
-    fields: [{ name: 'subject', label: 'subject', kind: 'text' }],
-    examples: [{ id: 'reset', title: 'Reset a subject', description: '→ true; the next consume starts a fresh window.', values: { subject: 'user:42' } }],
-    call: (v) => `await redis.rateLimiter.reset('${v.subject}')`,
-  },
-  burst: {
-    fields: [{ name: 'subject', label: 'subject', kind: 'text' }, { name: 'n', label: 'calls', kind: 'number' }],
-    examples: [{ id: 'fill', title: 'Fill the window', description: '15 × consume, 100 ms apart: 10 allowed, 5 denied.', values: { subject: 'user:42', n: 15 } }],
-    call: (v) => `for (let i = 0; i < ${v.n}; i++) await redis.rateLimiter.consume('${v.subject}')   // sent by the showcase`,
-  },
-};
-
 /* ───────────── pub/sub: one card per subscription ───────────── */
 export interface Card { id: string; channel: string; messages: { seq: number; at: number; value: string }[] }
 export interface Publish { id: string; at: number; channel: string; value: string; returned: number; delivered: number }
@@ -176,25 +107,6 @@ export function usePubSubSim(mode: Mode) {
   };
   return { cards, pubs, subscribe, unsubscribe, publish };
 }
-
-export const PUBSUB_OPS: Record<string, OpSpec> = {
-  subscribe: {
-    fields: [{ name: 'channel', label: 'channel', kind: 'text' }],
-    examples: [
-      { id: 'listen', title: 'Listen to orders', description: 'Opens a card for orders.created.', values: { channel: 'orders.created' } },
-      { id: 'second', title: 'A second listener', description: 'Same channel: both cards share one Redis SUBSCRIBE.', values: { channel: 'orders.created' } },
-    ],
-    call: (v) => `await redis.pubsub.subscribe('${v.channel}', (msg) => …)`,
-  },
-  publish: {
-    fields: [{ name: 'channel', label: 'channel', kind: 'text' }, { name: 'message', label: 'message (JSON)', kind: 'json' }],
-    examples: [
-      { id: 'order', title: 'Order created', description: 'Returned count vs cards that received it; on cluster it can be 0.', values: { channel: 'orders.created', message: '{ "orderId": "42", "total": 19.99 }' } },
-      { id: 'nobody', title: 'Nobody listening', description: '→ 0.', values: { channel: 'orders.cancelled', message: '{ "orderId": "7" }' } },
-    ],
-    call: (v) => `await redis.pubsub.publish('${v.channel}', ${String(v.message).replace(/\s+/g, ' ')})`,
-  },
-};
 
 /* ───────────── streams: entries, groups, pending ───────────── */
 export interface Entry { id: string; fields: Record<string, string> | Record<string, never> }
@@ -240,39 +152,3 @@ export function useStreamSim() {
   return { entries, groups, read, add, createGroup, readGroup, ack, del };
 }
 
-export const STREAM_OPS: Record<string, OpSpec> = {
-  createGroup: {
-    fields: [{ name: 'group', label: 'group', kind: 'text' }, { name: 'start', label: 'start id', kind: 'select', options: ['$', '0'] }],
-    examples: [
-      { id: 'billing', title: 'Billing from now on', description: 'Only entries added after this.', values: { group: 'billing', start: '$' } },
-      { id: 'audit', title: 'Audit replaying history', description: 'Start at 0: every existing entry.', values: { group: 'audit', start: '0' } },
-    ],
-    call: (v) => `await redis.streams.createGroup('orders', '${v.group}', '${v.start}')`,
-  },
-  add: {
-    fields: [{ name: 'fields', label: 'fields (JSON)', kind: 'json' }],
-    examples: [
-      { id: 'event', title: 'Append an order event', description: 'Shows up in the follow pane right away.', values: { fields: '{ "orderId": "42", "type": "created" }' } },
-      { id: 'empty', title: 'No fields', description: '→ STREAMS_INPUT.', values: { fields: '{}' } },
-    ],
-    call: (v) => `await redis.streams.add('orders', ${String(v.fields).replace(/\s+/g, ' ')})`,
-  },
-  read: {
-    fields: [{ name: 'group', label: 'group', kind: 'text' }, { name: 'consumer', label: 'consumer', kind: 'text' }, { name: 'count', label: 'count', kind: 'number' }, { name: 'pending', label: 're-read my pending entries (id 0)', kind: 'boolean' }],
-    examples: [
-      { id: 'w1', title: 'New entries for worker-1', description: '">": entries become pending until acked.', values: { group: 'billing', consumer: 'worker-1', count: 2, pending: false } },
-      { id: 'w2', title: 'worker-2 gets different ones', description: 'Each entry goes to one consumer in the group.', values: { group: 'billing', consumer: 'worker-2', count: 2, pending: false } },
-      { id: 'recover', title: 'Recover pending', description: 'id 0 re-delivers what worker-1 never acked.', values: { group: 'billing', consumer: 'worker-1', count: 10, pending: true } },
-      { id: 'ghost', title: 'Missing group', description: '→ NOGROUP from Redis.', values: { group: 'ghost', consumer: 'worker-1', count: 2, pending: false } },
-    ],
-    call: (v) => `await redis.streams.read('orders', { group: '${v.group}', consumer: '${v.consumer}', count: ${v.count}${v.pending ? ", id: '0'" : ''} })`,
-  },
-  ack: {
-    fields: [{ name: 'group', label: 'group', kind: 'text' }, { name: 'ids', label: 'ids', kind: 'token' }],
-    examples: [{ id: 'ack', title: 'Ack what I read', description: 'Clears it from the pending table.', values: { group: 'billing', ids: '$last' } }],
-    call: (v) => `await redis.streams.ack('orders', '${v.group}', ...ids)`,
-  },
-};
-
-export const SPECS: Record<string, Record<string, OpSpec>> = { lock: LOCK_OPS, 'rate-limit': RATE_OPS, pubsub: PUBSUB_OPS, streams: STREAM_OPS };
-export type { Values };
