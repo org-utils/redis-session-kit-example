@@ -2,6 +2,7 @@
 'use client';
 
 import { ChevronsUpDown, Database, Play } from 'lucide-react';
+import { useSearchParams } from 'next/navigation';
 import { useState } from 'react';
 import { ThemeToggle } from '@/components/theme-toggle';
 import { Badge } from '@/components/ui/badge';
@@ -15,16 +16,18 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import { Separator } from '@/components/ui/separator';
 import {
   Sidebar, SidebarContent, SidebarGroup, SidebarGroupLabel, SidebarHeader, SidebarInset, SidebarMenu,
-  SidebarMenuBadge, SidebarMenuButton, SidebarMenuItem, SidebarProvider, SidebarTrigger,
+  SidebarMenuBadge, SidebarMenuButton, SidebarMenuItem, SidebarProvider, SidebarRail, SidebarSeparator, SidebarTrigger,
 } from '@/components/ui/sidebar';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { cn } from '@/lib/utils';
-import { CliSnippet, Commands, HealthDot, HttpBadge, InsightLink, Json, KeysTable, ModeName } from './bits';
-import { MODES, MODULES, healthText, runOp, useStubLive, type Mode, type RunResult } from './stub';
+import { CliSnippet, Commands, HttpBadge, InsightLink, Json, KeysTable, ModeName } from './bits';
+import { MODES, MODE_ICON, MODULES, MODULE_ICON, healthDot, healthText, modeText, runOp, useStubLive, type Mode, type RunResult } from './stub';
 
 export const name = 'Sidebar, one mode at a time';
 
 export function VariantA() {
+  // PROTOTYPE: ?sidebar=closed starts collapsed, for screenshots of icon mode.
+  const startOpen = useSearchParams().get('sidebar') !== 'closed';
   const { status, events, simulateFailover } = useStubLive();
   const [mode, setMode] = useState<Mode>('standalone');
   const [moduleId, setModuleId] = useState('cache');
@@ -45,14 +48,19 @@ export function VariantA() {
   const s = status[focus?.mode ?? mode];
 
   return (
-    <SidebarProvider>
+    <SidebarProvider defaultOpen={startOpen}>
       <Sidebar collapsible="icon">
         <SidebarHeader>
           <SidebarMenu>
             <SidebarMenuItem>
-              <SidebarMenuButton size="lg">
-                <Database />
-                <div className="grid leading-tight"><span className="font-semibold">ioredis-toolkit</span><span className="text-xs text-muted-foreground">showcase</span></div>
+              <SidebarMenuButton size="lg" tooltip="ioredis-toolkit showcase">
+                <div className="flex aspect-square size-8 items-center justify-center rounded-lg bg-sidebar-primary text-sidebar-primary-foreground">
+                  <Database className="size-4" />
+                </div>
+                <div className="grid flex-1 text-left leading-tight">
+                  <span className="truncate font-semibold">ioredis-toolkit</span>
+                  <span className="truncate text-xs text-muted-foreground">showcase</span>
+                </div>
               </SidebarMenuButton>
             </SidebarMenuItem>
           </SidebarMenu>
@@ -61,43 +69,61 @@ export function VariantA() {
           <SidebarGroup>
             <SidebarGroupLabel>Connection mode</SidebarGroupLabel>
             <SidebarMenu>
-              {MODES.map((md) => (
-                <SidebarMenuItem key={md}>
-                  <SidebarMenuButton isActive={mode === md} disabled={!!mod.onlyMode && mod.onlyMode !== md} tooltip={md}
-                    onClick={() => { setMode(md); setResults([]); }}>
-                    <HealthDot health={status[md].health} /><ModeName mode={md} />
-                  </SidebarMenuButton>
-                  <SidebarMenuBadge className="font-mono">{status[md].latencyMs}ms</SidebarMenuBadge>
-                </SidebarMenuItem>
-              ))}
+              {MODES.map((md) => {
+                const Icon = MODE_ICON[md];
+                return (
+                  <SidebarMenuItem key={md}>
+                    <SidebarMenuButton isActive={mode === md} disabled={!!mod.onlyMode && mod.onlyMode !== md}
+                      tooltip={`${md} · ${status[md].health} · ${status[md].latencyMs}ms`}
+                      onClick={() => { setMode(md); setResults([]); }}>
+                      {/* icon in the mode's colour, health dot on its corner: still readable when collapsed */}
+                      <span className={cn('relative flex size-4 shrink-0', modeText[md])}>
+                        <Icon />
+                        <span className={cn('absolute -right-1 -bottom-1 size-2 rounded-full ring-2 ring-sidebar', healthDot[status[md].health])} />
+                      </span>
+                      <ModeName mode={md} />
+                    </SidebarMenuButton>
+                    <SidebarMenuBadge className="font-mono">{status[md].latencyMs}ms</SidebarMenuBadge>
+                  </SidebarMenuItem>
+                );
+              })}
             </SidebarMenu>
           </SidebarGroup>
+          <SidebarSeparator className="mx-0 hidden group-data-[collapsible=icon]:block" />
           <SidebarGroup>
             <SidebarGroupLabel>Feature modules</SidebarGroupLabel>
             <SidebarMenu>
-              {MODULES.filter((m) => m.kind === 'feature').map((m) => (
-                <SidebarMenuItem key={m.id}>
-                  <SidebarMenuButton isActive={moduleId === m.id} tooltip={m.label} onClick={() => pickModule(m.id)}>
-                    <span className="font-mono text-xs text-muted-foreground">{m.label.slice(0, 2)}</span>{m.label}
-                  </SidebarMenuButton>
-                </SidebarMenuItem>
-              ))}
+              {MODULES.filter((m) => m.kind === 'feature').map((m) => {
+                const Icon = MODULE_ICON[m.id];
+                return (
+                  <SidebarMenuItem key={m.id}>
+                    <SidebarMenuButton isActive={moduleId === m.id} tooltip={m.label} onClick={() => pickModule(m.id)}>
+                      <Icon /><span>{m.label}</span>
+                    </SidebarMenuButton>
+                  </SidebarMenuItem>
+                );
+              })}
             </SidebarMenu>
           </SidebarGroup>
+          <SidebarSeparator className="mx-0 hidden group-data-[collapsible=icon]:block" />
           <SidebarGroup>
             <SidebarGroupLabel>Mode-specific</SidebarGroupLabel>
             <SidebarMenu>
-              {MODULES.filter((m) => m.kind === 'mode-specific').map((m) => (
-                <SidebarMenuItem key={m.id}>
-                  <SidebarMenuButton isActive={moduleId === m.id} tooltip={m.label} onClick={() => pickModule(m.id)}>
-                    <span className="font-mono text-xs text-muted-foreground">{m.label.slice(0, 2)}</span>{m.label}
-                  </SidebarMenuButton>
-                  <SidebarMenuBadge><ModeName mode={m.onlyMode!} className="text-xs" /></SidebarMenuBadge>
-                </SidebarMenuItem>
-              ))}
+              {MODULES.filter((m) => m.kind === 'mode-specific').map((m) => {
+                const Icon = MODULE_ICON[m.id];
+                return (
+                  <SidebarMenuItem key={m.id}>
+                    <SidebarMenuButton isActive={moduleId === m.id} tooltip={`${m.label} · ${m.onlyMode} only`} onClick={() => pickModule(m.id)}>
+                      <Icon className={modeText[m.onlyMode!]} /><span>{m.label}</span>
+                    </SidebarMenuButton>
+                    <SidebarMenuBadge><ModeName mode={m.onlyMode!} className="text-xs" /></SidebarMenuBadge>
+                  </SidebarMenuItem>
+                );
+              })}
             </SidebarMenu>
           </SidebarGroup>
         </SidebarContent>
+        <SidebarRail />
       </Sidebar>
 
       <SidebarInset className="flex h-svh flex-col overflow-hidden">

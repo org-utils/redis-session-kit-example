@@ -2,6 +2,9 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
+import {
+  ArrowLeftRight, Eye, Gauge, Grid3x3, KeyRound, Layers, Lock, Network, Plug, Radio, Server, Waves, type LucideIcon,
+} from 'lucide-react';
 
 export type Mode = 'standalone' | 'sentinel' | 'cluster';
 export const MODES: Mode[] = ['standalone', 'sentinel', 'cluster'];
@@ -233,4 +236,10 @@ export const modeText: Record<Mode, string> = {
 };
 export const modeBorder: Record<Mode, string> = {
   standalone: 'border-t-mode-standalone', sentinel: 'border-t-mode-sentinel', cluster: 'border-t-mode-cluster',
+};
+
+export const MODE_ICON: Record<Mode, LucideIcon> = { standalone: Server, sentinel: Eye, cluster: Network };
+export const MODULE_ICON: Record<string, LucideIcon> = {
+  client: Plug, session: KeyRound, cache: Layers, lock: Lock, 'rate-limit': Gauge, pubsub: Radio, streams: Waves,
+  failover: ArrowLeftRight, slots: Grid3x3,
 };
