@@ -1,0 +1,22 @@
+{
+  "name": "backend",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "node --watch --env-file-if-exists=.env src/server.ts",
+    "test": "node --test 'src/**/*.test.ts'",
+    "typecheck": "tsc"
+  },
+  "dependencies": {
+    "@showcase/contracts": "workspace:*",
+    "fastify": "5.12.7",
+    "fastify-type-provider-zod": "7.0.0",
+    "ioredis": "5.11.1",
+    "ioredis-toolkit": "1.1.2",
+    "zod": "4.6.7"
+  },
+  "devDependencies": {
+    "@types/node": "24.19.0",
+    "typescript": "5.9.3"
+  }
+}

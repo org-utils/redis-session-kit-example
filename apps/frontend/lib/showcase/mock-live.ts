@@ -3,7 +3,7 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import type { Mode } from './mock-backend';
+import type { Mode } from '@showcase/contracts';
 
 const rnd = (n = 6) => Math.random().toString(36).slice(2, 2 + n);
 export function useNowMs(step = 100) {

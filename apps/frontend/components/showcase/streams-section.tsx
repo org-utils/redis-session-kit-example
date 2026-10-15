@@ -7,7 +7,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Table, TableBody, TableCell, TableRow } from '@/components/ui/table';
 import { cn } from '@/lib/utils';
 import type { Values } from '@/lib/showcase/examples';
-import type { Mode } from '@/lib/showcase/mock-backend';
+import type { Mode } from '@showcase/contracts';
 import { useStreamSim } from '@/lib/showcase/mock-live';
 import { OpForm } from './op-form';
 

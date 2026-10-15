@@ -6,8 +6,10 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { cn } from '@/lib/utils';
-import type { Health, KeyTouched, Mode, RunResult } from '@/lib/showcase/mock-backend';
-import { INITIAL_STATUS, healthDot, modeText } from '@/lib/showcase/mock-backend';
+import type { Mode } from '@showcase/contracts';
+import type { KeyTouched, RunResult } from '@/lib/showcase/mock-backend';
+import { modeText } from '@/lib/showcase/mock-backend';
+import { REDIS_INSIGHT, healthDot, redisCli, type Health } from '@/lib/showcase/live';
 
 export function HttpBadge({ code }: { code: number }) {
   if (code >= 500) return <Badge variant="destructive" className="font-mono">{code}</Badge>;
@@ -60,7 +62,7 @@ export function KeysTable({ keys, mode }: { keys: KeyTouched[]; mode: Mode }) {
 export function InsightLink({ mode }: { mode: Mode }) {
   return (
     <Button variant="link" size="xs" className="h-auto px-0" asChild>
-      <a href={INITIAL_STATUS[mode].redisInsight} target="_blank" rel="noreferrer">
+      <a href={REDIS_INSIGHT[mode]} target="_blank" rel="noreferrer">
         RedisInsight · {mode} <ExternalLink />
       </a>
     </Button>
@@ -76,5 +78,5 @@ export function Commands({ r }: { r: RunResult }) {
 }
 
 export function CliSnippet({ mode }: { mode: Mode }) {
-  return <code className="block break-all rounded-md bg-code p-2 font-mono text-[11px] text-code-foreground">{INITIAL_STATUS[mode].cli}</code>;
+  return <code className="block break-all rounded-md bg-code p-2 font-mono text-[11px] text-code-foreground">{redisCli(mode)}</code>;
 }

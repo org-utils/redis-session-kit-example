@@ -21,7 +21,9 @@ import {
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { cn } from '@/lib/utils';
 import { spec, type Values } from '@/lib/showcase/examples';
-import { MODES, MODE_ICON, MODULES, MODULE_ICON, healthDot, healthText, modeText, runOp, useStubLive, type Mode, type RunResult } from '@/lib/showcase/mock-backend';
+import { MODES, type Mode, type StatusResponse } from '@showcase/contracts';
+import { MODE_ICON, MODULES, MODULE_ICON, modeText, runOp, type RunResult } from '@/lib/showcase/mock-backend';
+import { formatLatency, healthDot, healthText, useLive } from '@/lib/showcase/live';
 import { useSessionLab } from '@/lib/showcase/mock-sessions';
 import { RequestForm } from './request-form';
 import { CliSnippet, Commands, HttpBadge, InsightLink, Json, KeysTable, ModeName } from './result-display';
@@ -33,10 +35,10 @@ import { SessionSection } from './session-section';
 import { SlotsSection } from './slots-section';
 import { StreamsSection } from './streams-section';
 
-export function ShowcaseShell() {
+export function ShowcaseShell({ initialStatus }: { initialStatus: StatusResponse | null }) {
   // ?module=<id> opens a section directly.
   const params = useSearchParams();
-  const { status, events } = useStubLive();
+  const { status, events, stream } = useLive(initialStatus);
   const [mode, setMode] = useState<Mode>('standalone');
   const [moduleId, setModuleId] = useState(MODULES.some((m) => m.id === params.get('module')) ? params.get('module')! : 'cache');
   const mod = MODULES.find((m) => m.id === moduleId)!;
@@ -91,7 +93,7 @@ export function ShowcaseShell() {
                 return (
                   <SidebarMenuItem key={md}>
                     <SidebarMenuButton isActive={mode === md} disabled={!!mod.onlyMode && mod.onlyMode !== md}
-                      tooltip={`${md} · ${status[md].health} · ${status[md].latencyMs}ms`}
+                      tooltip={`${md} · ${status[md].health} · ${formatLatency(status[md].latencyMs)}`}
                       onClick={() => { setMode(md); setResults([]); }}>
                       {/* icon in the mode's colour, health dot on its corner: still readable when collapsed */}
                       <span className={cn('relative flex size-4 shrink-0', modeText[md])}>
@@ -100,7 +102,7 @@ export function ShowcaseShell() {
                       </span>
                       <ModeName mode={md} />
                     </SidebarMenuButton>
-                    <SidebarMenuBadge className="font-mono">{status[md].latencyMs}ms</SidebarMenuBadge>
+                    <SidebarMenuBadge className="font-mono">{formatLatency(status[md].latencyMs)}</SidebarMenuBadge>
                   </SidebarMenuItem>
                 );
               })}
@@ -224,7 +226,7 @@ export function ShowcaseShell() {
                 ) : <p className="text-xs text-muted-foreground">Nothing yet.</p>}
                 <Separator />
                 <div className="space-y-2 text-xs">
-                  <div className={cn('font-medium', healthText[s.health])}>{s.health} · {s.latencyMs}ms</div>
+                  <div className={cn('font-medium', healthText[s.health])}>{s.health} · {formatLatency(s.latencyMs)}{!s.available && s.health !== 'unknown' && ' · unavailable (503)'}</div>
                   <div className="text-muted-foreground">{s.detail.join(' · ')}</div>
                   {s.failoverReady !== undefined && (
                     <Badge variant={s.failoverReady ? 'secondary' : 'destructive'}>{s.failoverReady ? 'failover ready' : 'not failover ready'}</Badge>
@@ -241,7 +243,9 @@ export function ShowcaseShell() {
         <Collapsible defaultOpen className="shrink-0 border-t">
           <CollapsibleTrigger asChild>
             <Button variant="ghost" size="sm" className="w-full justify-between rounded-none text-muted-foreground">
-              Event log · all modes <Badge variant="secondary">{events.length}</Badge><ChevronsUpDown className="ml-auto" />
+              Event log · all modes <Badge variant="secondary">{events.length}</Badge>
+              {stream === 'lost' && <span className="text-destructive">backend not reachable, retrying…</span>}
+              <ChevronsUpDown className="ml-auto" />
             </Button>
           </CollapsibleTrigger>
           <CollapsibleContent>
@@ -249,8 +253,10 @@ export function ShowcaseShell() {
               <ul className="px-4 pb-14 font-mono text-xs">
                 {events.map((e) => (
                   <li key={e.id} className="flex gap-3 py-0.5">
-                    <span className="text-muted-foreground">{e.at}</span><ModeName mode={e.mode} className="w-20" />
-                    <span className={e.kind === 'error' ? 'text-destructive' : 'text-warning'}>{e.text}</span>
+                    <span className="text-muted-foreground">{new Date(e.ts).toLocaleTimeString()}</span><ModeName mode={e.mode} className="w-20" />
+                    <span className={e.kind === 'error' ? 'text-destructive' : 'text-warning'}>
+                      {e.source}{e.channel && ` · ${e.channel}`}: {e.message}
+                    </span>
                   </li>
                 ))}
               </ul>

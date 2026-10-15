@@ -1,48 +1,11 @@
-// Mock backend: in-memory stand-ins for the Fastify API (mode status, the event log, operation results) until the
-// real backend exists. Everything here is fake; replace with calls to /api/:mode/... and /api/events.
-'use client';
-
-import { useEffect, useRef, useState } from 'react';
+// Mock backend: in-memory stand-ins for the Fastify API's operation results until each section's real routes exist.
+// Everything here is fake; replace with calls to /api/:mode/.... (Status and the event log are live: see live.ts.)
+import type { Mode } from '@showcase/contracts';
 import type { Values } from './examples';
+import type { ModeView } from './live';
 import {
   ArrowLeftRight, Eye, Gauge, Grid3x3, KeyRound, Layers, Lock, Network, Plug, Radio, Server, Waves, type LucideIcon,
 } from 'lucide-react';
-
-export type Mode = 'standalone' | 'sentinel' | 'cluster';
-export const MODES: Mode[] = ['standalone', 'sentinel', 'cluster'];
-export type Health = 'healthy' | 'degraded' | 'unhealthy';
-
-export interface ModeStatus {
-  mode: Mode;
-  health: Health;
-  latencyMs: number;
-  redisInsight: string;
-  cli: string;
-  detail: string[];
-  failoverReady?: boolean;
-}
-
-export const INITIAL_STATUS: Record<Mode, ModeStatus> = {
-  standalone: {
-    mode: 'standalone', health: 'healthy', latencyMs: 0.4,
-    redisInsight: 'http://localhost:5542',
-    cli: 'docker compose -p rsk-standalone -f infra/standalone.compose.yml run --rm redis-cli',
-    detail: ['127.0.0.1:6379'],
-  },
-  sentinel: {
-    mode: 'sentinel', health: 'healthy', latencyMs: 0.7,
-    redisInsight: 'http://localhost:5541',
-    cli: 'docker compose -p rsk-sentinel -f infra/sentinel.compose.yml run --rm redis-cli',
-    detail: ['master 127.0.0.1:6380', 'replica 127.0.0.1:6381 link ok', 'quorum OK 3/3'],
-    failoverReady: true,
-  },
-  cluster: {
-    mode: 'cluster', health: 'healthy', latencyMs: 1.1,
-    redisInsight: 'http://localhost:5540',
-    cli: 'docker compose -p rsk-cluster -f infra/cluster.compose.yml run --rm redis-cli',
-    detail: ['cluster_state ok', '7001 slots 0-5460', '7002 slots 5461-10922', '7003 slots 10923-16383'],
-  },
-};
 
 export type ModuleKind = 'feature' | 'mode-specific';
 export interface Op { id: string; label: string }
@@ -127,22 +90,22 @@ export interface RunResult {
 let runId = 0;
 const err = (code: string, name: string, message: string, mode: Mode) => ({ error: { code, name, message, mode } });
 
-export function runOp(mode: Mode, moduleId: string, opId: string, v: Values, status: ModeStatus): RunResult {
+export function runOp(mode: Mode, moduleId: string, opId: string, v: Values, status: ModeView): RunResult {
   const ns = `showcase:${moduleId === 'pubsub' ? 'events' : moduleId === 'streams' ? 'stream' : moduleId}`;
   const input = Object.values(v).map(String).join(' · ');
   const base = { id: ++runId, at: new Date().toLocaleTimeString(), mode, module: moduleId, op: opId, input,
-    latencyMs: +(status.latencyMs * (1 + Math.random())).toFixed(2) };
+    latencyMs: +((status.latencyMs ?? 1) * (1 + Math.random())).toFixed(2) };
   const k = (key: string, type: string, ttl: number | null): KeyTouched =>
     mode === 'cluster' ? { key, type, ttl, slot: slotOf(key), node: nodeOf(slotOf(key)) } : { key, type, ttl };
   const ok = (body: unknown, keys: KeyTouched[], commands: string[], httpStatus = 200): RunResult => ({ ...base, httpStatus, body, keys, commands });
   const fail = (httpStatus: number, code: string, name: string, message: string, commands: string[] = []): RunResult =>
     ({ ...base, httpStatus, body: err(code, name, message, mode), keys: [], commands });
 
-  if (status.health === 'unhealthy') return fail(503, 'MODE_UNAVAILABLE', 'ModeUnavailable', `${mode} has been unhealthy for 3 checks`);
+  if (!status.available) return fail(503, 'MODE_UNAVAILABLE', 'ModeUnavailableError', `${mode} is unavailable`);
 
   switch (`${moduleId}.${opId}`) {
     case 'client.health': {
-      const latency = status.latencyMs;
+      const latency = status.latencyMs ?? 0;
       const st = latency > Number(v.degradedMs) ? 'degraded' : status.health;
       return ok(mode === 'cluster'
         ? { status: st, latencyMs: 1.4, nodes: ['7001', '7002', '7003'].map((p) => ({ address: `127.0.0.1:${p}`, status: 'healthy', latencyMs: 1.1 })) }
@@ -195,39 +158,6 @@ export function runOp(mode: Mode, moduleId: string, opId: string, v: Values, sta
 
 function json(s: unknown) { try { return JSON.stringify(JSON.parse(String(s))); } catch { return String(s); } }
 
-export interface ShowcaseEvent { id: number; ts: number; at: string; mode: Mode; kind: 'health' | 'error'; text: string }
-
-const AMBIENT: Array<Omit<ShowcaseEvent, 'id' | 'at' | 'ts'>> = [
-  { mode: 'cluster', kind: 'health', text: 'health degraded (latency 132 ms on 127.0.0.1:7002)' },
-  { mode: 'cluster', kind: 'health', text: 'health healthy' },
-  { mode: 'standalone', kind: 'error', text: "pubsub-handler: handler for 'orders.created' threw TypeError" },
-  { mode: 'sentinel', kind: 'error', text: 'lock-release: release of job:42 failed (token mismatch)' },
-];
-
-/** Stub for the /api/events SSE stream plus status. */
-export function useStubLive() {
-  const [status, setStatus] = useState(INITIAL_STATUS);
-  const [events, setEvents] = useState<ShowcaseEvent[]>([]);
-  const nextId = useRef(0);
-  const push = (e: Omit<ShowcaseEvent, 'id' | 'at' | 'ts'>) =>
-    setEvents((prev) => [{ ...e, id: ++nextId.current, ts: Date.now(), at: new Date().toLocaleTimeString() }, ...prev].slice(0, 200));
-
-  useEffect(() => {
-    const t = setInterval(() => push(AMBIENT[Math.floor(Math.random() * AMBIENT.length)]), 6000);
-    return () => clearInterval(t);
-  }, []);
-
-
-  return { status, events };
-}
-
-// Token classes only (see the showcase tokens in app/globals.css).
-export const healthDot: Record<Health, string> = {
-  healthy: 'bg-success', degraded: 'bg-warning', unhealthy: 'bg-destructive',
-};
-export const healthText: Record<Health, string> = {
-  healthy: 'text-success', degraded: 'text-warning', unhealthy: 'text-destructive',
-};
 export const modeText: Record<Mode, string> = {
   standalone: 'text-mode-standalone', sentinel: 'text-mode-sentinel', cluster: 'text-mode-cluster',
 };

@@ -3,7 +3,8 @@
 'use client';
 
 import { useCallback, useRef, useState } from 'react';
-import type { KeyTouched, Mode, RunResult } from './mock-backend';
+import type { Mode } from '@showcase/contracts';
+import type { KeyTouched, RunResult } from './mock-backend';
 import { nodeOf, slotOf } from './mock-backend';
 
 export type Status = 'active' | 'consumed' | 'revoked';

@@ -6,7 +6,7 @@ import { Badge } from '@/components/ui/badge';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { cn } from '@/lib/utils';
 import type { Values } from '@/lib/showcase/examples';
-import type { Mode } from '@/lib/showcase/mock-backend';
+import type { Mode } from '@showcase/contracts';
 import { useLockSim, type Lane } from '@/lib/showcase/mock-live';
 import { OpForm } from './op-form';
 
