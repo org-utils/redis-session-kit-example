@@ -55,5 +55,5 @@ export const lockModule: FeatureModule = async (app, { client, events }) => {
   app.get('/lease', { schema: { querystring: LockLeaseQuerySchema } }, ({ query }) => readLease(client, lock.key(query.name)));
 
   // Reset section: a showcase convenience, not a lock call. Deletes everything under the lock namespace on this mode.
-  app.post('/reset', () => client.deletePatternClusterAware(`${client.config.lock.namespace}:*`));
+  app.post('/reset-section', () => client.deletePatternClusterAware(`${client.config.lock.namespace}:*`));
 };

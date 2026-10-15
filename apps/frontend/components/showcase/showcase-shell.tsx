@@ -72,9 +72,12 @@ export function ShowcaseShell({ initialStatus }: { initialStatus: StatusResponse
     setResults(await Promise.all(modes.map((md) => runOperation(md, moduleId, op.id, () => body(values)))));
     setRunning(false);
   };
+  // Bumped by Reset section: the live sections start over, since what they showed was just deleted.
+  const [resets, setResets] = useState(0);
   const resetSection = async () => {
     setRunning(true);
-    setResults([await runOperation(mode, moduleId, 'reset', () => ({}))]);
+    setResets((n) => n + 1);
+    setResults([await runOperation(mode, moduleId, 'reset-section', () => ({}))]);
     setRunning(false);
   };
   const focus = results.find((r) => r.mode === mode) ?? results[0];
@@ -194,7 +197,7 @@ export function ShowcaseShell({ initialStatus }: { initialStatus: StatusResponse
               ) : moduleId === 'lock' ? (
                 <LockSection mode={mode} onResult={(r) => setResults([r])} />
               ) : moduleId === 'rate-limit' ? (
-                <RateLimitSection mode={mode} />
+                <RateLimitSection key={resets} mode={mode} onResult={(r) => setResults([r])} />
               ) : moduleId === 'pubsub' ? (
                 <PubSubSection mode={mode} />
               ) : moduleId === 'streams' ? (

@@ -9,16 +9,16 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { cn } from '@/lib/utils';
 import { runOperation, type RunResult } from '@/lib/showcase/api';
 import { spec, type Values } from '@/lib/showcase/examples';
+import { perMode } from '@/lib/showcase/per-mode';
 import { useLease } from '@/lib/showcase/use-lease';
 import { useNow } from '@/lib/showcase/use-now';
-import { MODES, type Mode } from '@showcase/contracts';
+import type { Mode } from '@showcase/contracts';
 import { OpForm } from './op-form';
 
 type Lane = 'A' | 'B';
 const LANES: Lane[] = ['A', 'B'];
 const TOKENS_KEPT = 5;
 const short = (token: string) => `${token.slice(0, 8)}…`;
-const perMode = <T,>(make: () => T) => Object.fromEntries(MODES.map((m) => [m, make()])) as Record<Mode, T>;
 
 export function LockSection({ mode, onResult }: { mode: Mode; onResult: (r: RunResult) => void }) {
   // The lease the pane watches: the name the last operation ran on.

@@ -32,6 +32,7 @@ const cacheTtl = { name: 'ttl', label: 'ttl (seconds)', kind: 'number', help: 'b
 /** The lock section's holder: which lane runs the operation and keeps its tokens. Not sent to the backend. */
 const lane: Field = { name: 'lane', label: 'holder', kind: 'select', options: ['A', 'B'] };
 const lockName: Field = { name: 'name', label: 'name', kind: 'text' };
+const subject: Field = { name: 'subject', label: 'subject', kind: 'text' };
 const lockTtl: Field = { name: 'ttl', label: 'ttl (seconds)', kind: 'number', help: 'blank: the default lease, 30 s (maxTtl 300)' };
 
 export const OPS: Record<string, OpSpec> = {
@@ -356,32 +357,43 @@ export const OPS: Record<string, OpSpec> = {
     body: (v) => ({ name: v.name, work: Number(v.work), ttl: optional(v.ttl) }),
   },
   'rate-limit.consume': {
-    fields: [{ name: 'subject', label: 'subject', kind: 'text' }, { name: 'cost', label: 'cost', kind: 'number' }],
+    fields: [subject, { name: 'cost', label: 'cost', kind: 'number', help: 'blank: 1' }],
     examples: [
-      { id: 'one', title: 'One request', description: 'remaining goes down by one.', values: { subject: 'user:42', cost: 1 } },
+      { id: 'one', title: 'One request', description: 'allowed; remaining goes down by one.', values: { subject: 'user:42', cost: 1 } },
       { id: 'four', title: 'Expensive request', description: 'Costs 4 of the window at once.', values: { subject: 'user:42', cost: 4 } },
-      { id: 'big', title: 'Bigger than the window', description: 'cost 11 > limit 10 → denied.', values: { subject: 'user:42', cost: 11 } },
-      { id: 'bad', title: 'Invalid cost', description: '0 → RATE_LIMIT_INPUT.', values: { subject: 'user:42', cost: 0 } },
+      { id: 'big', title: 'Bigger than the window', description: 'cost 11 > limit 10 → denied with retryAfterSeconds. Denied calls still count against the window.', values: { subject: 'user:42', cost: 11 } },
+      { id: 'bad', title: 'Invalid cost', description: '0 → RATE_LIMIT_INPUT (400), nothing sent.', values: { subject: 'user:42', cost: 0 } },
+      { id: 'subject', title: 'Invalid subject', description: 'A subject starting with } → RATE_LIMIT_INPUT (400).', values: { subject: '}oops', cost: 1 } },
     ],
-    call: (v) => `await redis.rateLimiter.consume('${v.subject}', ${v.cost})`,
+    call: (v) => `await redis.rateLimiter.consume(${q(v.subject)}${v.cost !== '' ? `, ${v.cost}` : ''})`,
+    body: (v) => ({ subject: v.subject, cost: optional(v.cost) }),
   },
   'rate-limit.check': {
-    fields: [{ name: 'subject', label: 'subject', kind: 'text' }],
+    fields: [subject],
     examples: [
-      { id: 'peek', title: 'Peek without consuming', description: 'Count unchanged.', values: { subject: 'user:42' } },
-      { id: 'limit', title: 'At exactly the limit', description: 'After filling to 10: consume allowed the 10th, check says denied.', values: { subject: 'user:42' } },
+      { id: 'peek', title: 'Peek without consuming', description: 'The count is unchanged.', values: { subject: 'user:42' } },
+      { id: 'limit', title: 'At exactly the limit', description: 'Reset user:42, then consume ten times (or Burst 10): consume allowed the 10th (count ≤ max), but check says denied (count < max).', values: { subject: 'user:42' } },
     ],
-    call: (v) => `await redis.rateLimiter.check('${v.subject}')`,
+    call: (v) => `await redis.rateLimiter.check(${q(v.subject)})`,
+    body: (v) => ({ subject: v.subject }),
   },
   'rate-limit.reset': {
-    fields: [{ name: 'subject', label: 'subject', kind: 'text' }],
-    examples: [{ id: 'reset', title: 'Reset a subject', description: '→ true; the next consume starts a fresh window.', values: { subject: 'user:42' } }],
-    call: (v) => `await redis.rateLimiter.reset('${v.subject}')`,
+    fields: [subject],
+    examples: [
+      { id: 'reset', title: 'Reset a subject', description: '→ true; the next consume starts from 0.', values: { subject: 'user:42' } },
+      { id: 'unknown', title: 'Unknown subject', description: 'No window to delete → false.', values: { subject: 'user:nobody' } },
+    ],
+    call: (v) => `await redis.rateLimiter.reset(${q(v.subject)})`,
+    body: (v) => ({ subject: v.subject }),
   },
   'rate-limit.burst': {
-    fields: [{ name: 'subject', label: 'subject', kind: 'text' }, { name: 'n', label: 'calls', kind: 'number' }],
-    examples: [{ id: 'fill', title: 'Fill the window', description: '15 × consume, 100 ms apart: 10 allowed, 5 denied.', values: { subject: 'user:42', n: 15 } }],
-    call: (v) => `for (let i = 0; i < ${v.n}; i++) await redis.rateLimiter.consume('${v.subject}')   // sent by the showcase`,
+    fields: [subject, { name: 'n', label: 'calls', kind: 'number' }],
+    examples: [
+      { id: 'fill', title: 'Fill the window', description: '15 × consume, ~100 ms apart: 10 allowed, 5 denied with retryAfterSeconds (from an empty window).', values: { subject: 'user:42', n: 15 } },
+      { id: 'ten', title: 'Exactly ten', description: 'Fills the window to the limit: then try check’s “At exactly the limit”.', values: { subject: 'user:42', n: 10 } },
+    ],
+    call: (v) => `for (let i = 0; i < ${v.n}; i++) await redis.rateLimiter.consume(${q(v.subject)})   // sent by the showcase, ~100 ms apart`,
+    body: (v) => ({ subject: v.subject }),
   },
   'pubsub.subscribe': {
     fields: [{ name: 'channel', label: 'channel', kind: 'text' }],

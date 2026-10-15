@@ -46,7 +46,7 @@ for (const mode of MODES) {
     const lease = async (name = NAME) =>
       (await app.inject({ method: 'GET', url: `/api/${mode}/lock/lease`, query: { name } })).json();
 
-    before(() => call('reset'));
+    before(() => call('reset-section'));
 
     test('A acquires; B is refused while A holds the lease, but still gets a token of its own', async () => {
       const a = await call('acquire', { name: NAME, ttl: 30 });
@@ -60,24 +60,24 @@ for (const mode of MODES) {
     });
 
     test('the lease is read from Redis: the stored token and the key’s remaining TTL', async () => {
-      await call('reset');
+      await call('reset-section');
       const { body } = await call('acquire', { name: NAME, ttl: 30 });
       const state = await lease();
       assert.deepEqual([state.key, state.token], [`showcase:lock:${NAME}`, body.result.token]);
       assert.ok(state.ttlMs > 29_000 && state.ttlMs <= 30_000, `ttlMs ${state.ttlMs}`);
-      await call('reset');
+      await call('reset-section');
       assert.deepEqual(await lease(), { key: `showcase:lock:${NAME}`, token: null, ttlMs: null });
     });
 
     test('a blank ttl takes the default lease, 30 s', async () => {
-      await call('reset');
+      await call('reset-section');
       await call('acquire', { name: NAME });
       const { ttlMs } = await lease();
       assert.ok(ttlMs > 29_000 && ttlMs <= 30_000, `ttlMs ${ttlMs}`);
     });
 
     test('extend resets the lease with the holder’s token, and refuses the refused token', async () => {
-      await call('reset');
+      await call('reset-section');
       const a = (await call('acquire', { name: NAME, ttl: 5 })).body.result.token;
       const b = (await call('acquire', { name: NAME, ttl: 5 })).body.result.token;
       assert.equal((await call('extend', { name: NAME, token: a, ttl: 30 })).body.result, true);
@@ -86,7 +86,7 @@ for (const mode of MODES) {
     });
 
     test('release with the other lane’s token is refused and the lock survives; with the holder’s it frees it', async () => {
-      await call('reset');
+      await call('reset-section');
       const a = (await call('acquire', { name: NAME, ttl: 30 })).body.result.token;
       const b = (await call('acquire', { name: NAME, ttl: 30 })).body.result.token;
       assert.equal((await call('release', { name: NAME, token: b })).body.result, false);
@@ -110,7 +110,7 @@ for (const mode of MODES) {
     });
 
     test('using holds the lease server-side for the work; a second using meanwhile answers LOCK_HELD', async () => {
-      await call('reset');
+      await call('reset-section');
       const using = call('using', { name: NAME, work: 1, ttl: 30 });
       await new Promise((resolve) => setTimeout(resolve, 200));
       const held = await lease();
@@ -126,7 +126,7 @@ for (const mode of MODES) {
     });
 
     test('work outlasting the lease: B acquires mid-work, and the release that finds it gone shows in the event log', async () => {
-      await call('reset');
+      await call('reset-section');
       const started = Date.now();
       const using = call('using', { name: NAME, work: 1.2, ttl: 0.5 });
       await new Promise((resolve) => setTimeout(resolve, 700));
@@ -141,10 +141,10 @@ for (const mode of MODES) {
       assert.match(entry.message, /^report:nightly: the lease ran out mid-work/);
     });
 
-    test('reset deletes every key in the lock namespace on this mode', async () => {
+    test('reset-section deletes every key in the lock namespace on this mode', async () => {
       await call('acquire', { name: NAME, ttl: 30 });
       await call('acquire', { name: 'cart:42', ttl: 30 });
-      const reset = await call('reset');
+      const reset = await call('reset-section');
       assert.ok(reset.body.result >= 2, `deleted ${reset.body.result}`);
       assert.equal((await lease()).token, null);
     });

@@ -24,5 +24,5 @@ export const cacheModule: FeatureModule = async (app, { client }) => {
   app.post('/clear', { schema: { body: CacheClearRequestSchema } }, ({ body }) => cache.clear(body.pattern));
 
   // Reset section: a showcase convenience, not a cache call. Deletes everything under the cache namespace on this mode.
-  app.post('/reset', () => client.deletePatternClusterAware(`${client.config.cache.namespace}:*`));
+  app.post('/reset-section', () => client.deletePatternClusterAware(`${client.config.cache.namespace}:*`));
 };

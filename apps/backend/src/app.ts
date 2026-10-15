@@ -15,6 +15,7 @@ import { createTemporaryClients, type TemporaryClients } from './redis/temporary
 import { cacheModule } from './modules/cache/plugin.ts';
 import { clientModule } from './modules/client/plugin.ts';
 import { lockModule } from './modules/lock/plugin.ts';
+import { rateLimitModule } from './modules/rate-limit/plugin.ts';
 
 /**
  * A feature module: registered once per mode under `/api/<mode>/<name>`, given that mode's client (and a factory for
@@ -37,7 +38,12 @@ declare module 'fastify' {
 }
 
 /** The feature modules by name, which is also their path segment. */
-export const FEATURE_MODULES: Record<string, FeatureModule> = { client: clientModule, cache: cacheModule, lock: lockModule };
+export const FEATURE_MODULES: Record<string, FeatureModule> = {
+  client: clientModule,
+  cache: cacheModule,
+  lock: lockModule,
+  'rate-limit': rateLimitModule,
+};
 
 export interface AppOptions {
   config: Config;

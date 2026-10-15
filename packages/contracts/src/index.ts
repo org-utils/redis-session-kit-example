@@ -226,6 +226,24 @@ export const LockLeaseSchema = z.object({
 });
 export type LockLease = z.infer<typeof LockLeaseSchema>;
 
+/* ───────────── rate limit: POST /api/:mode/rate-limit/<operation> ───────────── */
+
+// The package validates the cost and subject itself (RATE_LIMIT_INPUT); a blank cost is left out, so it counts 1.
+export const RateLimitConsumeRequestSchema = z.object({ subject: z.string(), cost: z.number().optional() });
+export const RateLimitSubjectRequestSchema = z.object({ subject: z.string() });
+
+/** The package's `consume()` / `check()` result, as returned. */
+export const RateLimitResultSchema = z.object({
+  allowed: z.boolean(),
+  limit: z.number(),
+  remaining: z.number(),
+  /** Unix seconds, in Redis server time, when the window ends. */
+  resetAt: z.number(),
+  retryAfterSeconds: z.number(),
+  count: z.number(),
+});
+export type RateLimitResult = z.infer<typeof RateLimitResultSchema>;
+
 /* ───────────── errors: every non-2xx response ───────────── */
 
 export const ErrorBodySchema = z.object({
