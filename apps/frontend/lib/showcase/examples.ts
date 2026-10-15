@@ -397,18 +397,26 @@ export const OPS: Record<string, OpSpec> = {
   'pubsub.subscribe': {
     fields: [{ name: 'channel', label: 'channel', kind: 'text' }],
     examples: [
-      { id: 'listen', title: 'Listen to orders', description: 'Opens a card for orders.created.', values: { channel: 'orders.created' } },
-      { id: 'second', title: 'A second listener', description: 'Same channel: both cards share one Redis SUBSCRIBE.', values: { channel: 'orders.created' } },
+      { id: 'listen', title: 'Listen to orders', description: 'Opens a card for orders.created: an SSE stream, subscribed through the package while it is open.', values: { channel: 'orders.created' } },
+      { id: 'second', title: 'A second listener', description: 'Same channel: both cards share one Redis SUBSCRIBE. Closing the last card sends the UNSUBSCRIBE.', values: { channel: 'orders.created' } },
     ],
-    call: (v) => `await redis.pubsub.subscribe('${v.channel}', (msg) => …)`,
+    call: (v) => `const subscription = await redis.pubsub.subscribe(${q(v.channel)}, (message) => card.show(message))`,
   },
   'pubsub.publish': {
-    fields: [{ name: 'channel', label: 'channel', kind: 'text' }, { name: 'message', label: 'message (JSON)', kind: 'json' }],
-    examples: [
-      { id: 'order', title: 'Order created', description: 'Returned count vs cards that received it; on cluster it can be 0.', values: { channel: 'orders.created', message: '{ "orderId": "42", "total": 19.99 }' } },
-      { id: 'nobody', title: 'Nobody listening', description: '→ 0.', values: { channel: 'orders.cancelled', message: '{ "orderId": "7" }' } },
+    fields: [
+      { name: 'channel', label: 'channel', kind: 'text' },
+      { name: 'message', label: 'message (JSON, or any text when raw)', kind: 'json' },
+      { name: 'raw', label: 'raw: a plain PUBLISH from outside the package', kind: 'boolean' },
     ],
-    call: (v) => `await redis.pubsub.publish('${v.channel}', ${String(v.message).replace(/\s+/g, ' ')})`,
+    examples: [
+      { id: 'order', title: 'Order created', description: 'The count publish returned beside how many cards received it. On cluster the count is only the subscribers on the node that took the PUBLISH, so it can be 0 while cards still receive it.', values: { channel: 'orders.created', message: '{ "orderId": "42", "total": 19.99 }', raw: false } },
+      { id: 'nobody', title: 'Nobody listening', description: 'No card on orders.cancelled → 0.', values: { channel: 'orders.cancelled', message: '{ "orderId": "7" }', raw: false } },
+      { id: 'raw', title: 'A non-JSON message from elsewhere', description: 'A raw PUBLISH of "not json": the subscriber drops it and reports PUBSUB_SERIALIZATION once in the event log, however many cards listen.', values: { channel: 'orders.created', message: 'not json', raw: true } },
+    ],
+    call: (v) => (v.raw
+      ? `await redis.publish('showcase:events:${v.channel}', ${JSON.stringify(String(v.message))})   // raw ioredis, not the package`
+      : `await redis.pubsub.publish(${q(v.channel)}, ${json(v.message)})`),
+    body: (v) => (v.raw ? { channel: v.channel, message: String(v.message) } : { channel: v.channel, message: parse(v.message, 'message') }),
   },
   'streams.createGroup': {
     fields: [{ name: 'group', label: 'group', kind: 'text' }, { name: 'start', label: 'start id', kind: 'select', options: ['$', '0'] }],
