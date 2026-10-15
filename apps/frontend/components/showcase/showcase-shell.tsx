@@ -40,8 +40,9 @@ export function ShowcaseShell({ initialStatus }: { initialStatus: StatusResponse
   // ?module=<id> opens a section directly; the showcase opens on Session.
   const params = useSearchParams();
   const { status, events, stream } = useLive(initialStatus);
-  const [mode, setMode] = useState<Mode>('standalone');
   const [moduleId, setModuleId] = useState(MODULES.some((m) => m.id === params.get('module')) ? params.get('module')! : 'session');
+  // A mode-specific module opened by ?module= starts on its one mode, as picking it in the sidebar does.
+  const [mode, setMode] = useState<Mode>(() => MODULES.find((m) => m.id === moduleId)?.onlyMode ?? 'standalone');
   const mod = MODULES.find((m) => m.id === moduleId)!;
   const [opId, setOpId] = useState(mod.ops[0].id);
   const op = mod.ops.find((o) => o.id === opId) ?? mod.ops[0];
@@ -192,7 +193,7 @@ export function ShowcaseShell({ initialStatus }: { initialStatus: StatusResponse
               ) : moduleId === 'failover' ? (
                 <FailoverSection />
               ) : moduleId === 'slots' ? (
-                <SlotsSection />
+                <SlotsSection onResult={(r) => setResults([r])} />
               ) : moduleId === 'lock' ? (
                 <LockSection mode={mode} onResult={(r) => setResults([r])} />
               ) : moduleId === 'rate-limit' ? (

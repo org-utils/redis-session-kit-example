@@ -60,27 +60,6 @@ export const MODULES: ShowcaseModule[] = [
     ops: [{ id: 'inspect', label: 'key inspector' }] },
 ];
 
-// Real CRC16/XMODEM so the cluster stub shows believable slots.
-function crc16(s: string): number {
-  let crc = 0;
-  for (const b of new TextEncoder().encode(s)) {
-    crc ^= b << 8;
-    for (let i = 0; i < 8; i++) crc = crc & 0x8000 ? ((crc << 1) ^ 0x1021) & 0xffff : (crc << 1) & 0xffff;
-  }
-  return crc;
-}
-export function slotOf(key: string): number {
-  const open = key.indexOf('{');
-  if (open >= 0) {
-    const close = key.indexOf('}', open + 1);
-    if (close > open + 1) key = key.slice(open + 1, close);
-  }
-  return crc16(key) % 16384;
-}
-export function nodeOf(slot: number): string {
-  return slot <= 5460 ? '127.0.0.1:7001' : slot <= 10922 ? '127.0.0.1:7002' : '127.0.0.1:7003';
-}
-
 export const modeText: Record<Mode, string> = {
   standalone: 'text-mode-standalone', sentinel: 'text-mode-sentinel', cluster: 'text-mode-cluster',
 };

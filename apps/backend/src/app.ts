@@ -1,6 +1,7 @@
 // Builds the Fastify app without listening, so tests can drive it with inject().
 import Fastify, { type FastifyReply, type FastifyServerOptions } from 'fastify';
 import { type FastifyPluginAsyncZod, serializerCompiler, validatorCompiler } from 'fastify-type-provider-zod';
+import type { Mode } from '@showcase/contracts';
 import type { KeyManager, RedisClient } from 'ioredis-toolkit';
 import type { Config } from './config/index.ts';
 import { ModeUnavailableError, registerErrorHandling } from './http/errors.ts';
@@ -20,6 +21,7 @@ import { pubsubModule } from './modules/pubsub/plugin.ts';
 import { rateLimitModule } from './modules/rate-limit/plugin.ts';
 import { sessionModule } from './modules/session/plugin.ts';
 import { streamsModule } from './modules/streams/plugin.ts';
+import { slotsModule } from './modules/slots/plugin.ts';
 
 /**
  * A feature module: registered once per mode under `/api/<mode>/<name>`, given that mode's client (and a factory for
@@ -42,6 +44,13 @@ export interface ModeEvents {
   append(entry: NewEntry): void;
 }
 
+/**
+ * A mode-specific module: registered on one mode only, under `/api/<mode>/<name>`, for behaviour only that mode has
+ * (cluster slots, sentinel failover). Besides that mode's client and event log, it sees the config, for the addresses
+ * its own connections to Redis need.
+ */
+export type ModeSpecificModule = FastifyPluginAsyncZod<{ client: RedisClient; events: ModeEvents; config: Config }>;
+
 declare module 'fastify' {
   interface FastifyRequest {
     /** The Redis trace of a feature module request, from its handler on. */
@@ -60,13 +69,21 @@ export const FEATURE_MODULES: Record<string, FeatureModule> = {
   streams: streamsModule,
 };
 
+/** The mode-specific modules by mode, then by name (their path segment). */
+export const MODE_SPECIFIC_MODULES: Partial<Record<Mode, Record<string, ModeSpecificModule>>> = {
+  cluster: { slots: slotsModule },
+};
+
 export interface AppOptions {
   config: Config;
   logger?: FastifyServerOptions['logger'];
   modules?: Record<string, FeatureModule>;
+  modeModules?: Partial<Record<Mode, Record<string, ModeSpecificModule>>>;
 }
 
-export async function buildApp({ config, logger = false, modules = FEATURE_MODULES }: AppOptions) {
+export async function buildApp({
+  config, logger = false, modules = FEATURE_MODULES, modeModules = MODE_SPECIFIC_MODULES,
+}: AppOptions) {
   const app = Fastify({ logger });
   app.setValidatorCompiler(validatorCompiler);
   app.setSerializerCompiler(serializerCompiler);
@@ -136,6 +153,9 @@ export async function buildApp({ config, logger = false, modules = FEATURE_MODUL
             client, temporaryClients, events, sessionMetrics: sessionMetrics.get(mode)!, sessionKeys,
             prefix: `/${name}`,
           });
+        }
+        for (const [name, module] of Object.entries(modeModules[mode] ?? {})) {
+          await scope.register(module, { client, events, config, prefix: `/${name}` });
         }
       },
       { prefix: `/api/${mode}` },
