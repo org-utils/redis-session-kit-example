@@ -32,14 +32,19 @@ export function usePubSubCards() {
   const [cards, setCards] = useState<Card[]>([]);
   const [publishes, setPublishes] = useState<Publish[]>([]);
   const sources = useRef(new Map<number, EventSource>());
+  // Subscribes still waiting for Redis's confirmation, settled as cancelled if their card closes first.
+  const waiting = useRef(new Map<number, () => void>());
   const seq = useRef(0);
 
   // Leaving the section closes every card: the backend unsubscribes them.
   useEffect(() => {
     const open = sources.current;
+    const pending = waiting.current;
     return () => {
       for (const source of open.values()) source.close();
       open.clear();
+      for (const cancel of pending.values()) cancel();
+      pending.clear();
     };
   }, []);
 
@@ -53,10 +58,14 @@ export function usePubSubCards() {
     const source = new EventSource(`/api/${mode}/pubsub/channels/${encodeURIComponent(channel)}/stream`);
     sources.current.set(id, source);
     return new Promise((resolve) => {
-      const done = (httpStatus: number, body: unknown) => resolve({
-        id, at: new Date().toLocaleTimeString(), mode, module: 'pubsub', op: 'subscribe', input: JSON.stringify({ channel }),
-        httpStatus, latencyMs: +(performance.now() - started).toFixed(1), body, keys: [], commands: [],
-      });
+      const done = (httpStatus: number, body: unknown) => {
+        waiting.current.delete(id);
+        resolve({
+          id, at: new Date().toLocaleTimeString(), mode, module: 'pubsub', op: 'subscribe', input: JSON.stringify({ channel }),
+          httpStatus, latencyMs: +(performance.now() - started).toFixed(1), body, keys: [], commands: [],
+        });
+      };
+      waiting.current.set(id, () => done(0, { error: { code: 'CLOSED', message: 'the card closed before Redis confirmed the subscription' } }));
       source.onmessage = (event) => {
         const parsed = PubSubStreamEventSchema.safeParse(JSON.parse(event.data));
         if (!parsed.success) return;
@@ -94,6 +103,7 @@ export function usePubSubCards() {
 
   /** Closes a card: its stream ends, and the backend unsubscribes it (UNSUBSCRIBE if it was the channel's last). */
   const unsubscribe = (id: number) => {
+    waiting.current.get(id)?.();
     sources.current.get(id)?.close();
     sources.current.delete(id);
     setCards((cs) => cs.filter((c) => c.id !== id));

@@ -4,12 +4,12 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 
 const KEEPALIVE_MS = 15_000;
 
-export interface SseStream {
-  /** Sends one `data:` payload, as JSON. Does nothing once the stream has ended. */
-  send(data: unknown): void;
+/** One open stream, sending events of type `E`. */
+export interface SseStream<E> {
+  /** Sends one event as a `data:` payload, as JSON. Does nothing once the stream has ended. */
+  send(event: E): void;
   /** Runs `fn` when the stream ends, or at once if it already has. */
   onEnd(fn: () => void): void;
-  readonly ended: boolean;
   end(): void;
 }
 
@@ -17,13 +17,13 @@ export interface SseStream {
  * Returns a function that turns a request into an SSE stream. Every stream it opened is ended before `app` closes:
  * open streams never end on their own, so close() would otherwise wait on them forever.
  */
-export function sseStreams(app: FastifyInstance): (request: FastifyRequest, reply: FastifyReply) => SseStream {
+export function sseStreams(app: FastifyInstance): <E>(request: FastifyRequest, reply: FastifyReply) => SseStream<E> {
   const open = new Set<() => void>();
   app.addHook('preClose', async () => {
     for (const end of open) end();
   });
 
-  return (request, reply) => {
+  return <E>(request: FastifyRequest, reply: FastifyReply): SseStream<E> => {
     reply.hijack();
     const res = reply.raw;
     res.writeHead(200, {
@@ -48,15 +48,12 @@ export function sseStreams(app: FastifyInstance): (request: FastifyRequest, repl
     request.raw.on('close', end);
 
     return {
-      send(data) {
-        if (!ended) res.write(`data: ${JSON.stringify(data)}\n\n`);
+      send(event) {
+        if (!ended) res.write(`data: ${JSON.stringify(event)}\n\n`);
       },
       onEnd(fn) {
         if (ended) fn();
         else cleanups.push(fn);
-      },
-      get ended() {
-        return ended;
       },
       end,
     };

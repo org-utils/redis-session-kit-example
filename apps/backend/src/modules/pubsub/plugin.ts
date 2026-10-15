@@ -22,18 +22,17 @@ export const pubsubModule: FeatureModule = async (app, { client }) => {
 
   app.get('/channels/:channel/stream', { schema: { params: PubSubChannelParamsSchema } }, (request, reply) => {
     const { channel } = request.params;
-    const stream = openStream(request, reply);
-    const send = (event: PubSubStreamEvent) => stream.send(event);
+    const stream = openStream<PubSubStreamEvent>(request, reply);
     pubsub
-      .subscribe(channel, (message) => send({ type: 'message', channel: message.channel, value: message.value }))
+      .subscribe(channel, (message) => stream.send({ type: 'message', channel: message.channel, value: message.value }))
       .then(
         (subscription) => {
           // Closed while subscribing, or later: either way this card's subscription goes.
           stream.onEnd(() => void subscription.unsubscribe().catch(() => {}));
-          send({ type: 'subscribed', channel });
+          stream.send({ type: 'subscribed', channel });
         },
         (error: Error & { code?: string }) => {
-          send({ type: 'error', error: { code: error.code ?? 'SUBSCRIBE_FAILED', name: error.name, message: error.message } });
+          stream.send({ type: 'error', error: { code: error.code ?? 'SUBSCRIBE_FAILED', name: error.name, message: error.message } });
           stream.end();
         },
       );

@@ -13,13 +13,12 @@ export const eventRoutes: FastifyPluginAsync<{ eventLog: EventLog; monitor: Stat
   const openStream = sseStreams(app);
 
   app.get('/api/events', (request, reply) => {
-    const stream = openStream(request, reply);
-    const send = (event: ServerEvent) => stream.send(event);
+    const stream = openStream<ServerEvent>(request, reply);
 
-    send({ type: 'status', modes: monitor.snapshot() });
-    for (const entry of eventLog.entries()) send({ type: 'entry', entry });
-    const offEntries = eventLog.subscribe((entry) => send({ type: 'entry', entry }));
-    const offStatus = monitor.subscribe((modes) => send({ type: 'status', modes }));
+    stream.send({ type: 'status', modes: monitor.snapshot() });
+    for (const entry of eventLog.entries()) stream.send({ type: 'entry', entry });
+    const offEntries = eventLog.subscribe((entry) => stream.send({ type: 'entry', entry }));
+    const offStatus = monitor.subscribe((modes) => stream.send({ type: 'status', modes }));
     stream.onEnd(() => {
       offEntries();
       offStatus();
