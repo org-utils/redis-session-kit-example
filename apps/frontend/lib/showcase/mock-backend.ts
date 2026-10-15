@@ -1,6 +1,7 @@
-// Mock backend: in-memory stand-ins for the Fastify API's operation results until each section's real routes exist.
-// Everything here is fake; replace with calls to /api/:mode/.... (Status and the event log are live: see live.ts; an
-// operation whose spec has a request `body` runs for real: see api.ts.)
+// The module catalogue (MODULES, with each feature module's namespace for Reset section) and its icons, plus a mock
+// backend: in-memory stand-ins for the operations whose real routes don't exist yet (runOp: the session
+// section). Every operation whose spec has a request `body` runs for real: see api.ts; status and the event log are
+// live: see live.ts.
 import type { Mode } from '@showcase/contracts';
 import type { KeyTouched, RunResult } from './api';
 import type { Values } from './examples';

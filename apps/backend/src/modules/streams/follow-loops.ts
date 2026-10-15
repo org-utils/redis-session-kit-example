@@ -39,13 +39,20 @@ export function createFollowLoops(client: RedisClient): FollowLoops {
     for (const listener of loop.listeners) listener(event);
   };
 
-  async function run(stream: string, loop: Loop) {
-    // Entries added from now on: an explicit id rather than `$`, so nothing added between two reads is missed. Starting
-    // a millisecond back may show one entry added just before, never lose one added just after.
+  /**
+   * Entries added from now on: an explicit id rather than `$`, so nothing added between two reads is missed. Starting a
+   * millisecond back may show one entry added just before, never lose one added just after.
+   */
+  async function fromNow(): Promise<string> {
     const [seconds, micros] = await client.time();
-    let id = `${Number(seconds) * 1000 + Math.floor(Number(micros) / 1000) - 1}-0`;
+    return `${Number(seconds) * 1000 + Math.floor(Number(micros) / 1000) - 1}-0`;
+  }
+
+  async function run(stream: string, loop: Loop) {
+    let id: string | null = null;
     while (!loop.stopped) {
       try {
+        id ??= await fromNow();
         const entries = await client.streams.read(stream, { id, count: 100, blockMs: BLOCK_MS });
         if (loop.stopped) break;
         if (entries.length) {
@@ -66,13 +73,7 @@ export function createFollowLoops(client: RedisClient): FollowLoops {
       if (!loop) {
         loop = { id: ++lastId, listeners: new Set(), stopped: false };
         loops.set(stream, loop);
-        const started = loop;
-        void run(stream, started).catch((error) => {
-          // TIME failed before the loop began: tell the listeners and let the next follower start over.
-          broadcast(started, { type: 'error', message: error instanceof Error ? error.message : String(error) });
-          started.stopped = true;
-          if (loops.get(stream) === started) loops.delete(stream);
-        });
+        void run(stream, loop);
       }
       const joined = loop;
       broadcast(joined, { type: 'listeners', listeners: joined.listeners.size + 1 });

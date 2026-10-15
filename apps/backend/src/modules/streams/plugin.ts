@@ -71,10 +71,9 @@ export const streamsModule: FeatureModule = async (app, { client }) => {
 
   app.get('/:stream/follow', { schema: { params: StreamsStreamRequestSchema } }, (request, reply) => {
     const { stream: name } = request.params;
-    const stream = openStream(request, reply);
-    const send = (event: StreamsFollowEvent) => stream.send(event);
-    const following = loops.follow(name, send);
-    send({ type: 'following', stream: name, loop: following.loop, listeners: following.listeners });
+    const stream = openStream<StreamsFollowEvent>(request, reply);
+    const following = loops.follow(name, stream.send);
+    stream.send({ type: 'following', stream: name, loop: following.loop, listeners: following.listeners });
     stream.onEnd(following.leave);
   });
 

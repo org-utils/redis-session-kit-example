@@ -10,7 +10,7 @@ import { Table, TableBody, TableCell, TableRow } from '@/components/ui/table';
 import { cn } from '@/lib/utils';
 import { runOperation, type RunResult } from '@/lib/showcase/api';
 import { spec, type Values } from '@/lib/showcase/examples';
-import { perMode } from '@/lib/showcase/per-mode';
+import { perMode, useOnReset } from '@/lib/showcase/per-mode';
 import { useEventSource } from '@/lib/showcase/use-event-source';
 import { usePolled } from '@/lib/showcase/use-polled';
 import { StreamEntrySchema, StreamsFollowEventSchema, StreamsPendingSchema, type Mode, type StreamEntry } from '@showcase/contracts';
@@ -40,10 +40,11 @@ function useFollow(mode: Mode, stream: string) {
       });
     },
   });
-  return { ...state, connection };
+  const clear = () => setState((s) => ({ ...s, entries: [] }));
+  return { ...state, connection, clear };
 }
 
-export function StreamsSection({ mode, onResult }: { mode: Mode; onResult: (r: RunResult) => void }) {
+export function StreamsSection({ mode, resets, onResult }: { mode: Mode; resets: Record<Mode, number>; onResult: (r: RunResult) => void }) {
   // The stream both panes watch: the one the last operation ran on.
   const [stream, setStream] = useState('orders');
   const [refresh, setRefresh] = useState(0);
@@ -52,6 +53,11 @@ export function StreamsSection({ mode, onResult }: { mode: Mode; onResult: (r: R
   // Ids this browser has read, per mode: the last read's, and every one so far (newest first) with who read it.
   const [read, setRead] = useState(() => perMode<{ last: string[]; all: { id: string; by: string }[] }>(() => ({ last: [], all: [] })));
   const ids = read[mode];
+  // Reset section deleted this mode's streams: what was read and followed there is gone.
+  useOnReset(resets, (m) => {
+    setRead((s) => ({ ...s, [m]: { last: [], all: [] } }));
+    if (m === mode) follow.clear();
+  });
 
   const pendingIds = new Set(pending?.groups.flatMap((g) => g.consumers.flatMap((c) => c.pending.map((p) => p.id))) ?? []);
   const run = async (op: string, v: Values): Promise<RunResult> => {
@@ -62,7 +68,7 @@ export function StreamsSection({ mode, onResult }: { mode: Mode; onResult: (r: R
     const entries = StreamEntrySchema.array().safeParse(r.body);
     if (op === 'read' && r.httpStatus === 200 && entries.success && entries.data.length) {
       const got = entries.data.map((e) => e.id);
-      const by = String(v.group) ? `${v.consumer || '?'}` : 'plain read';
+      const by = v.group === '' ? 'plain read' : String(v.consumer);
       setRead((s) => ({ ...s, [at]: { last: got, all: [...got.map((id) => ({ id, by })), ...s[at].all.filter((x) => !got.includes(x.id))].slice(0, IDS_KEPT) } }));
     }
     setRefresh((n) => n + 1);
