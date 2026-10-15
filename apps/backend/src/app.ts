@@ -17,6 +17,7 @@ import { clientModule } from './modules/client/plugin.ts';
 import { lockModule } from './modules/lock/plugin.ts';
 import { pubsubModule } from './modules/pubsub/plugin.ts';
 import { rateLimitModule } from './modules/rate-limit/plugin.ts';
+import { streamsModule } from './modules/streams/plugin.ts';
 
 /**
  * A feature module: registered once per mode under `/api/<mode>/<name>`, given that mode's client (and a factory for
@@ -45,6 +46,7 @@ export const FEATURE_MODULES: Record<string, FeatureModule> = {
   lock: lockModule,
   'rate-limit': rateLimitModule,
   pubsub: pubsubModule,
+  streams: streamsModule,
 };
 
 export interface AppOptions {

@@ -202,7 +202,7 @@ export function ShowcaseShell({ initialStatus }: { initialStatus: StatusResponse
               ) : moduleId === 'pubsub' ? (
                 <PubSubSection mode={mode} onResult={(r) => setResults([r])} />
               ) : moduleId === 'streams' ? (
-                <StreamsSection mode={mode} />
+                <StreamsSection key={resets} mode={mode} onResult={(r) => setResults([r])} />
               ) : (<>
               <Tabs value={op.id} onValueChange={(v) => loadOp(moduleId, v)}>
                 <TabsList variant="line">

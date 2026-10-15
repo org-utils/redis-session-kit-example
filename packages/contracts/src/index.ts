@@ -264,6 +264,60 @@ export const PubSubStreamEventSchema = z.discriminatedUnion('type', [
 ]);
 export type PubSubStreamEvent = z.infer<typeof PubSubStreamEventSchema>;
 
+/* ───────────── streams: POST /api/:mode/streams/<operation>, GET …/pending, GET …/:stream/follow ───────────── */
+
+export const StreamsStreamRequestSchema = z.object({ stream: z.string() });
+export const StreamsCreateGroupRequestSchema = z.object({ stream: z.string(), group: z.string(), start: z.string().optional() });
+// The package checks the fields itself (STREAMS_INPUT when empty); a blank maxEntries keeps its default trim.
+export const StreamsAddRequestSchema = z.object({
+  stream: z.string(),
+  fields: z.record(z.string(), z.string()),
+  maxEntries: z.number().optional(),
+});
+/** A plain read, or a group read with `group` (and `consumer`: without one the package answers STREAMS_INPUT). */
+export const StreamsReadRequestSchema = z.object({
+  stream: z.string(),
+  group: z.string().optional(),
+  consumer: z.string().optional(),
+  count: z.number().optional(),
+  id: z.string().optional(),
+});
+export const StreamsAckRequestSchema = z.object({ stream: z.string(), group: z.string(), ids: z.array(z.string()) });
+export const StreamsDeleteRequestSchema = z.object({ stream: z.string(), ids: z.array(z.string()) });
+
+/** One entry as the package returns it. `fields` is empty for a pending entry deleted from the stream since delivery. */
+export const StreamEntrySchema = z.object({ id: z.string(), fields: z.record(z.string(), z.string()) });
+export type StreamEntry = z.infer<typeof StreamEntrySchema>;
+
+/** Delivered-but-unacked entries per group and consumer, read with native XINFO and XPENDING: not part of the package. */
+export const StreamsPendingSchema = z.object({
+  groups: z.array(
+    z.object({
+      name: z.string(),
+      consumers: z.array(
+        z.object({
+          name: z.string(),
+          pending: z.array(z.object({ id: z.string(), idleMs: z.number(), deliveries: z.number() })),
+        }),
+      ),
+    }),
+  ),
+});
+export type StreamsPending = z.infer<typeof StreamsPendingSchema>;
+
+/**
+ * One SSE `data:` payload on a stream's follow pane, all fed by one shared read loop per stream. `following` on
+ * connect (which loop, and how many listen to it); `listeners` when another one joins or leaves; `entries` as they are
+ * added; `error` when a read failed (the loop retries).
+ */
+export const StreamsFollowEventSchema = z.discriminatedUnion('type', [
+  z.object({ type: z.literal('following'), stream: z.string(), loop: z.number(), listeners: z.number() }),
+  z.object({ type: z.literal('listeners'), listeners: z.number() }),
+  z.object({ type: z.literal('entries'), entries: z.array(StreamEntrySchema) }),
+  z.object({ type: z.literal('error'), message: z.string() }),
+]);
+export type StreamsFollowEvent = z.infer<typeof StreamsFollowEventSchema>;
+
 /* ───────────── errors: every non-2xx response ───────────── */
 
 export const ErrorBodySchema = z.object({

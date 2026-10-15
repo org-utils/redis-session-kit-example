@@ -10,9 +10,9 @@ import { cn } from '@/lib/utils';
 import { runOperation, type RunResult } from '@/lib/showcase/api';
 import { spec, type Values } from '@/lib/showcase/examples';
 import { perMode } from '@/lib/showcase/per-mode';
-import { useLease } from '@/lib/showcase/use-lease';
 import { useNow } from '@/lib/showcase/use-now';
-import type { Mode } from '@showcase/contracts';
+import { usePolled } from '@/lib/showcase/use-polled';
+import { LockLeaseSchema, type Mode } from '@showcase/contracts';
 import { OpForm } from './op-form';
 
 type Lane = 'A' | 'B';
@@ -23,7 +23,8 @@ const short = (token: string) => `${token.slice(0, 8)}…`;
 export function LockSection({ mode, onResult }: { mode: Mode; onResult: (r: RunResult) => void }) {
   // The lease the pane watches: the name the last operation ran on.
   const [name, setName] = useState('report:nightly');
-  const lease = useLease(mode, name);
+  // The lease as Redis holds it (native GET + PTTL), re-read every 250 ms.
+  const lease = usePolled(`/api/${mode}/lock/lease?${new URLSearchParams({ name })}`, LockLeaseSchema, 250);
   // Tokens this browser was handed, per mode and lane, newest first; and each lane's `using` still running.
   const [tokens, setTokens] = useState(() => perMode<Record<Lane, string[]>>(() => ({ A: [], B: [] })));
   // Per lane: how many `using` calls are open, and when the longest one's work ends.
