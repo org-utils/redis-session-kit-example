@@ -26,8 +26,12 @@ import { useSessionLab } from '@/lib/showcase/mock-sessions';
 import { RequestForm } from './request-form';
 import { CliSnippet, Commands, HttpBadge, InsightLink, Json, KeysTable, ModeName } from './result-display';
 import { FailoverSection } from './failover-section';
+import { LockSection } from './lock-section';
+import { PubSubSection } from './pubsub-section';
+import { RateLimitSection } from './rate-limit-section';
 import { SessionSection } from './session-section';
 import { SlotsSection } from './slots-section';
+import { StreamsSection } from './streams-section';
 
 export function ShowcaseShell() {
   // ?module=<id> opens a section directly.
@@ -161,6 +165,14 @@ export function ShowcaseShell() {
                 <FailoverSection />
               ) : moduleId === 'slots' ? (
                 <SlotsSection />
+              ) : moduleId === 'lock' ? (
+                <LockSection mode={mode} />
+              ) : moduleId === 'rate-limit' ? (
+                <RateLimitSection mode={mode} />
+              ) : moduleId === 'pubsub' ? (
+                <PubSubSection mode={mode} />
+              ) : moduleId === 'streams' ? (
+                <StreamsSection mode={mode} />
               ) : (<>
               <Tabs value={op.id} onValueChange={(v) => loadOp(moduleId, v)}>
                 <TabsList variant="line">

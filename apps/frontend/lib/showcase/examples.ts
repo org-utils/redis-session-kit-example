@@ -178,93 +178,114 @@ export const OPS: Record<string, OpSpec> = {
   },
 
   'lock.acquire': {
-    fields: [{ name: 'name', label: 'name', kind: 'text' }, { name: 'ttl', label: 'ttl (seconds)', kind: 'number' }],
+    fields: [{ name: 'lane', label: 'holder', kind: 'select', options: ['A', 'B'] }, { name: 'name', label: 'name', kind: 'text' }, { name: 'ttl', label: 'ttl (seconds)', kind: 'number' }],
     examples: [
-      { id: 'job', title: 'Nightly report job', description: 'A 30 s lease; run it twice to see the second one refused.', values: { name: 'report:nightly', ttl: 30 } },
-      { id: 'short', title: 'Sub-second lease', description: 'TTLs may be fractional, down to milliseconds.', values: { name: 'cart:42', ttl: 0.5 } },
-      { id: 'limit', title: 'Over maxTtl', description: '600 s exceeds the 300 s maxTtl: LOCK_LIMIT.', values: { name: 'migration', ttl: 600 } },
+      { id: 'a', title: 'Nightly report job (A)', description: 'A 30 s lease from holder A.', values: { lane: 'A', name: 'report:nightly', ttl: 30 } },
+      { id: 'b', title: '…then from B', description: 'Refused while A holds it, but B still gets a token.', values: { lane: 'B', name: 'report:nightly', ttl: 30 } },
+      { id: 'short', title: 'Sub-second lease', description: 'TTLs may be fractional.', values: { lane: 'A', name: 'report:nightly', ttl: 0.5 } },
+      { id: 'limit', title: 'Over maxTtl', description: '600 s → LOCK_LIMIT.', values: { lane: 'A', name: 'migration', ttl: 600 } },
     ],
-    call: (v) => `await redis.lock.acquire(${q(v.name)}, ${v.ttl})`,
+    call: (v) => `await redis.lock.acquire('${v.name}', ${v.ttl})   // holder ${v.lane}`,
   },
   'lock.extend': {
-    fields: [{ name: 'name', label: 'name', kind: 'text' }, { name: 'token', label: 'token', kind: 'text' }, { name: 'ttl', label: 'ttl (seconds)', kind: 'number' }],
+    fields: [{ name: 'lane', label: 'holder', kind: 'select', options: ['A', 'B'] }, { name: 'token', label: 'token', kind: 'token' }, { name: 'ttl', label: 'ttl (seconds)', kind: 'number' }],
     examples: [
-      { id: 'mine', title: 'Extend my lease', description: 'Resets the lease to ttl (it does not add to it).', values: { name: 'report:nightly', token: '(last acquired)', ttl: 30 } },
-      { id: 'theirs', title: 'Someone else\'s token', description: 'Compare-and-PEXPIRE fails: false.', values: { name: 'report:nightly', token: 'not-my-token', ttl: 30 } },
+      { id: 'mine', title: 'Extend my lease', description: 'Resets the lease to ttl; it does not add to it.', values: { lane: 'A', token: '$A', ttl: 30 } },
+      { id: 'refused', title: 'With the refused token', description: 'B\'s token from a refused acquire → false.', values: { lane: 'B', token: '$B', ttl: 30 } },
     ],
-    call: (v) => `await redis.lock.extend(${q(v.name)}, token, ${v.ttl})`,
+    call: (v) => `await redis.lock.extend('report:nightly', token, ${v.ttl})`,
   },
   'lock.release': {
-    fields: [{ name: 'name', label: 'name', kind: 'text' }, { name: 'token', label: 'token', kind: 'text' }],
+    fields: [{ name: 'lane', label: 'holder', kind: 'select', options: ['A', 'B'] }, { name: 'token', label: 'token', kind: 'token' }],
     examples: [
-      { id: 'mine', title: 'Release with my token', description: 'Lua compare-and-delete: true.', values: { name: 'report:nightly', token: '(last acquired)' } },
-      { id: 'theirs', title: 'Release with a wrong token', description: 'The lock survives: false.', values: { name: 'report:nightly', token: 'not-my-token' } },
+      { id: 'mine', title: 'With my token', description: 'Compare-and-delete → true.', values: { lane: 'A', token: '$A' } },
+      { id: 'theirs', title: 'With the other lane\'s token', description: '→ false; the lock survives.', values: { lane: 'B', token: '$B' } },
     ],
-    call: (v) => `await redis.lock.release(${q(v.name)}, token)`,
+    call: () => `await redis.lock.release('report:nightly', token)`,
   },
-
+  'lock.using': {
+    fields: [{ name: 'lane', label: 'holder', kind: 'select', options: ['A', 'B'] }, { name: 'work', label: 'work (seconds)', kind: 'number' }, { name: 'ttl', label: 'ttl (seconds)', kind: 'number' }],
+    examples: [
+      { id: 'hold', title: 'Hold for 10 s', description: 'The other lane is refused meanwhile; a second using → LOCK_HELD.', values: { lane: 'A', work: 10, ttl: 30 } },
+      { id: 'outlast', title: 'Work outlasts the lease', description: 'work 8 s, ttl 3: B can acquire mid-work; the release fails into the event log.', values: { lane: 'A', work: 8, ttl: 3 } },
+    ],
+    call: (v) => `await redis.lock.using('report:nightly', async () => work(${v.work}s), ${v.ttl})`,
+  },
   'rate-limit.consume': {
     fields: [{ name: 'subject', label: 'subject', kind: 'text' }, { name: 'cost', label: 'cost', kind: 'number' }],
     examples: [
-      { id: 'one', title: 'One request', description: '100 per 60 s window; remaining goes down by one.', values: { subject: 'user:42', cost: 1 } },
-      { id: 'bulk', title: 'Expensive request', description: 'Costs 25 of the window at once.', values: { subject: 'user:42', cost: 25 } },
-      { id: 'bad', title: 'Invalid cost', description: 'Cost must be a positive integer: RATE_LIMIT_INPUT.', values: { subject: 'user:42', cost: 0 } },
+      { id: 'one', title: 'One request', description: 'remaining goes down by one.', values: { subject: 'user:42', cost: 1 } },
+      { id: 'four', title: 'Expensive request', description: 'Costs 4 of the window at once.', values: { subject: 'user:42', cost: 4 } },
+      { id: 'big', title: 'Bigger than the window', description: 'cost 11 > limit 10 → denied.', values: { subject: 'user:42', cost: 11 } },
+      { id: 'bad', title: 'Invalid cost', description: '0 → RATE_LIMIT_INPUT.', values: { subject: 'user:42', cost: 0 } },
     ],
-    call: (v) => `await redis.rateLimiter.consume(${q(v.subject)}, ${v.cost})`,
+    call: (v) => `await redis.rateLimiter.consume('${v.subject}', ${v.cost})`,
   },
   'rate-limit.check': {
     fields: [{ name: 'subject', label: 'subject', kind: 'text' }],
-    examples: [{ id: 'peek', title: 'Peek without consuming', description: 'Same result shape, count unchanged.', values: { subject: 'user:42' } }],
-    call: (v) => `await redis.rateLimiter.check(${q(v.subject)})`,
+    examples: [
+      { id: 'peek', title: 'Peek without consuming', description: 'Count unchanged.', values: { subject: 'user:42' } },
+      { id: 'limit', title: 'At exactly the limit', description: 'After filling to 10: consume allowed the 10th, check says denied.', values: { subject: 'user:42' } },
+    ],
+    call: (v) => `await redis.rateLimiter.check('${v.subject}')`,
   },
   'rate-limit.reset': {
     fields: [{ name: 'subject', label: 'subject', kind: 'text' }],
-    examples: [{ id: 'reset', title: 'Reset a subject', description: 'Deletes the window; the next consume starts fresh.', values: { subject: 'user:42' } }],
-    call: (v) => `await redis.rateLimiter.reset(${q(v.subject)})`,
+    examples: [{ id: 'reset', title: 'Reset a subject', description: '→ true; the next consume starts a fresh window.', values: { subject: 'user:42' } }],
+    call: (v) => `await redis.rateLimiter.reset('${v.subject}')`,
   },
-
-  'pubsub.publish': {
-    fields: [{ name: 'channel', label: 'channel', kind: 'text' }, { name: 'message', label: 'message (JSON)', kind: 'json' }],
-    examples: [
-      { id: 'order', title: 'Order created', description: 'Returns the subscriber count; on cluster it can be 0 even when delivered.', values: { channel: 'orders.created', message: '{ "orderId": "42", "total": 19.99 }' } },
-      { id: 'nobody', title: 'Nobody listening', description: 'A channel with no subscribers: 0.', values: { channel: 'orders.cancelled', message: '{ "orderId": "7" }' } },
-    ],
-    call: (v) => `await redis.pubsub.publish(${q(v.channel)}, ${json(v.message)})`,
+  'rate-limit.burst': {
+    fields: [{ name: 'subject', label: 'subject', kind: 'text' }, { name: 'n', label: 'calls', kind: 'number' }],
+    examples: [{ id: 'fill', title: 'Fill the window', description: '15 × consume, 100 ms apart: 10 allowed, 5 denied.', values: { subject: 'user:42', n: 15 } }],
+    call: (v) => `for (let i = 0; i < ${v.n}; i++) await redis.rateLimiter.consume('${v.subject}')   // sent by the showcase`,
   },
   'pubsub.subscribe': {
     fields: [{ name: 'channel', label: 'channel', kind: 'text' }],
-    examples: [{ id: 'listen', title: 'Listen to orders', description: 'Opens a live stream; publish from another tab to see it arrive.', values: { channel: 'orders.created' } }],
-    call: (v) => `await redis.pubsub.subscribe(${q(v.channel)}, (msg) => …)`,
-  },
-
-  'streams.add': {
-    fields: [{ name: 'stream', label: 'stream', kind: 'text' }, { name: 'fields', label: 'fields (JSON)', kind: 'json' }, { name: 'maxEntries', label: 'maxEntries', kind: 'number' }],
     examples: [
-      { id: 'event', title: 'Append an order event', description: 'XADD with an approximate MAXLEN cap.', values: { stream: 'orders', fields: '{ "orderId": "42", "type": "created" }', maxEntries: 100000 } },
-      { id: 'capped', title: 'Tiny capped stream', description: 'maxEntries 10: older entries get trimmed.', values: { stream: 'recent', fields: '{ "n": "1" }', maxEntries: 10 } },
-      { id: 'empty', title: 'No fields', description: 'An empty field map: STREAMS_INPUT.', values: { stream: 'orders', fields: '{}', maxEntries: 100000 } },
+      { id: 'listen', title: 'Listen to orders', description: 'Opens a card for orders.created.', values: { channel: 'orders.created' } },
+      { id: 'second', title: 'A second listener', description: 'Same channel: both cards share one Redis SUBSCRIBE.', values: { channel: 'orders.created' } },
     ],
-    call: (v) => `await redis.streams.add(${q(v.stream)}, ${json(v.fields)}, ${v.maxEntries})`,
+    call: (v) => `await redis.pubsub.subscribe('${v.channel}', (msg) => …)`,
+  },
+  'pubsub.publish': {
+    fields: [{ name: 'channel', label: 'channel', kind: 'text' }, { name: 'message', label: 'message (JSON)', kind: 'json' }],
+    examples: [
+      { id: 'order', title: 'Order created', description: 'Returned count vs cards that received it; on cluster it can be 0.', values: { channel: 'orders.created', message: '{ "orderId": "42", "total": 19.99 }' } },
+      { id: 'nobody', title: 'Nobody listening', description: '→ 0.', values: { channel: 'orders.cancelled', message: '{ "orderId": "7" }' } },
+    ],
+    call: (v) => `await redis.pubsub.publish('${v.channel}', ${String(v.message).replace(/\s+/g, ' ')})`,
+  },
+  'streams.createGroup': {
+    fields: [{ name: 'group', label: 'group', kind: 'text' }, { name: 'start', label: 'start id', kind: 'select', options: ['$', '0'] }],
+    examples: [
+      { id: 'billing', title: 'Billing from now on', description: 'Only entries added after this.', values: { group: 'billing', start: '$' } },
+      { id: 'audit', title: 'Audit replaying history', description: 'Start at 0: every existing entry.', values: { group: 'audit', start: '0' } },
+    ],
+    call: (v) => `await redis.streams.createGroup('orders', '${v.group}', '${v.start}')`,
+  },
+  'streams.add': {
+    fields: [{ name: 'fields', label: 'fields (JSON)', kind: 'json' }],
+    examples: [
+      { id: 'event', title: 'Append an order event', description: 'Shows up in the follow pane right away.', values: { fields: '{ "orderId": "42", "type": "created" }' } },
+      { id: 'empty', title: 'No fields', description: '→ STREAMS_INPUT.', values: { fields: '{}' } },
+    ],
+    call: (v) => `await redis.streams.add('orders', ${String(v.fields).replace(/\s+/g, ' ')})`,
   },
   'streams.read': {
-    fields: [
-      { name: 'stream', label: 'stream', kind: 'text' }, { name: 'group', label: 'group', kind: 'text' },
-      { name: 'consumer', label: 'consumer', kind: 'text' }, { name: 'count', label: 'count', kind: 'number' },
-      { name: 'pending', label: 're-read my pending entries (id 0)', kind: 'boolean' },
-    ],
+    fields: [{ name: 'group', label: 'group', kind: 'text' }, { name: 'consumer', label: 'consumer', kind: 'text' }, { name: 'count', label: 'count', kind: 'number' }, { name: 'pending', label: 're-read my pending entries (id 0)', kind: 'boolean' }],
     examples: [
-      { id: 'new', title: 'New entries for worker-1', description: 'Group read with ">" : entries become pending until acked.', values: { stream: 'orders', group: 'billing', consumer: 'worker-1', count: 10, pending: false } },
-      { id: 'pending', title: 'Recover pending entries', description: 'id 0 re-delivers what worker-1 never acked.', values: { stream: 'orders', group: 'billing', consumer: 'worker-1', count: 10, pending: true } },
-      { id: 'nogroup', title: 'Missing group', description: 'Reading a group that was never created: NOGROUP from Redis.', values: { stream: 'orders', group: 'ghost', consumer: 'worker-1', count: 10, pending: false } },
+      { id: 'w1', title: 'New entries for worker-1', description: '">": entries become pending until acked.', values: { group: 'billing', consumer: 'worker-1', count: 2, pending: false } },
+      { id: 'w2', title: 'worker-2 gets different ones', description: 'Each entry goes to one consumer in the group.', values: { group: 'billing', consumer: 'worker-2', count: 2, pending: false } },
+      { id: 'recover', title: 'Recover pending', description: 'id 0 re-delivers what worker-1 never acked.', values: { group: 'billing', consumer: 'worker-1', count: 10, pending: true } },
+      { id: 'ghost', title: 'Missing group', description: '→ NOGROUP from Redis.', values: { group: 'ghost', consumer: 'worker-1', count: 2, pending: false } },
     ],
-    call: (v) => `await redis.streams.read(${q(v.stream)}, { group: ${q(v.group)}, consumer: ${q(v.consumer)}, count: ${v.count}${v.pending ? ", id: '0'" : ''} })`,
+    call: (v) => `await redis.streams.read('orders', { group: '${v.group}', consumer: '${v.consumer}', count: ${v.count}${v.pending ? ", id: '0'" : ''} })`,
   },
   'streams.ack': {
-    fields: [{ name: 'stream', label: 'stream', kind: 'text' }, { name: 'group', label: 'group', kind: 'text' }, { name: 'ids', label: 'ids (comma separated)', kind: 'text' }],
-    examples: [{ id: 'ack', title: 'Ack what I read', description: 'Clears entries from the pending list.', values: { stream: 'orders', group: 'billing', ids: '(last read ids)' } }],
-    call: (v) => `await redis.streams.ack(${q(v.stream)}, ${q(v.group)}, ...ids)`,
+    fields: [{ name: 'group', label: 'group', kind: 'text' }, { name: 'ids', label: 'ids', kind: 'token' }],
+    examples: [{ id: 'ack', title: 'Ack what I read', description: 'Clears it from the pending table.', values: { group: 'billing', ids: '$last' } }],
+    call: (v) => `await redis.streams.ack('orders', '${v.group}', ...ids)`,
   },
-
   'failover.drill': {
     fields: [
       { name: 'kind', label: 'how the master goes away', kind: 'select', options: ['graceful', 'unresponsive'] },
