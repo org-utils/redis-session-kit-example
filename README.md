@@ -45,10 +45,10 @@ Each section runs real package calls on the connection mode you pick in the side
 | What | Where |
 | --- | --- |
 | App (Next.js) | http://localhost:3000 |
-| Backend (Fastify) | http://localhost:4000 |
+| Backend (Fastify) | http://localhost:4000, its API under `/api` (e.g. http://localhost:4000/api/status) |
 | RedisInsight | standalone http://localhost:5542 · sentinel http://localhost:5541 · cluster http://localhost:5540 |
 | Redis standalone | 6379 |
-| Redis sentinel | master 6380, replica 6381, sentinels 26379–26381 (`mymaster`) |
+| Redis sentinel | master 6380 and replica 6381 (until a failover swaps them), sentinels 26379–26381 (`mymaster`) |
 | Redis cluster | 7001–7003 |
 
 ## Scripts
