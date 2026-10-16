@@ -2,7 +2,7 @@
 // opt-in compare across modes, a right-hand Redis-state panel and one collapsible event log for all modes.
 'use client';
 
-import { ChevronsUpDown, Database, Eraser, Play } from 'lucide-react';
+import { ChevronsUpDown, Database, Eraser, ExternalLink, Play } from 'lucide-react';
 import { useSearchParams } from 'next/navigation';
 import { useState } from 'react';
 import { ThemeToggle } from '@/components/theme-toggle';
@@ -23,7 +23,7 @@ import { cn } from '@/lib/utils';
 import { spec, type Values } from '@/lib/showcase/examples';
 import { MODES, type EventLogEntry, type Mode, type StatusResponse } from '@showcase/contracts';
 import { runOperation, type RunResult } from '@/lib/showcase/api';
-import { MODE_ICON, MODULES, MODULE_ICON, modeText } from '@/lib/showcase/mock-backend';
+import { MODE_ICON, MODULES, MODULE_ICON, modeText, sourceUrl } from '@/lib/showcase/mock-backend';
 import { formatLatency, healthDot, healthText, useLive } from '@/lib/showcase/live';
 import { perMode } from '@/lib/showcase/per-mode';
 import { RequestForm } from './request-form';
@@ -180,7 +180,12 @@ export function ShowcaseShell({ initialStatus }: { initialStatus: StatusResponse
             <div className="@container space-y-5 p-6">
               <div className="flex flex-wrap items-start justify-between gap-4">
                 <div>
-                  <h1 className="text-2xl font-semibold tracking-tight">{mod.label}</h1>
+                  <div className="flex items-baseline gap-3">
+                    <h1 className="text-2xl font-semibold tracking-tight">{mod.label}</h1>
+                    <Button variant="link" size="xs" className="h-auto px-0 text-muted-foreground" asChild>
+                      <a href={sourceUrl(mod)} target="_blank" rel="noreferrer">Source <ExternalLink /></a>
+                    </Button>
+                  </div>
                   <p className="text-sm text-muted-foreground">{mod.blurb}</p>
                 </div>
                 {mod.namespace && (

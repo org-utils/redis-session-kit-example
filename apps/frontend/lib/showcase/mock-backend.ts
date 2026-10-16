@@ -1,6 +1,6 @@
-// The module catalogue (MODULES, with each feature module's namespace for Reset section) and its icons, plus the slot
-// helpers the slots section's stand-in still uses. Every feature module operation runs for real: see api.ts; status and
-// the event log are live: see live.ts.
+// The module catalogue (MODULES, with each feature module's namespace for Reset section, and each module's Source link)
+// and its icons, plus the slot helpers the slots section's stand-in still uses. Every feature module operation runs for
+// real: see api.ts; status and the event log are live: see live.ts.
 import type { Mode } from '@showcase/contracts';
 import {
   ArrowLeftRight, Eye, Gauge, Grid3x3, KeyRound, Layers, Lock, Network, Plug, Radio, Server, Waves, type LucideIcon,
@@ -59,6 +59,10 @@ export const MODULES: ShowcaseModule[] = [
   { id: 'slots', label: 'Slots', kind: 'mode-specific', onlyMode: 'cluster', blurb: 'Key → hash slot → node, hash tags, fan-out.',
     ops: [{ id: 'inspect', label: 'key inspector' }] },
 ];
+
+/** A module's backend folder on GitHub (`main`), which the section header links as Source. */
+export const sourceUrl = (mod: ShowcaseModule) =>
+  `https://github.com/org-utils/redis-session-kit-example/tree/main/apps/backend/src/modules/${mod.id}`;
 
 export const modeText: Record<Mode, string> = {
   standalone: 'text-mode-standalone', sentinel: 'text-mode-sentinel', cluster: 'text-mode-cluster',
