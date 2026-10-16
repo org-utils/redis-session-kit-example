@@ -91,3 +91,19 @@ export function startTrace(): TraceRecording {
 
 /** Runs `fn` with nothing it sends recorded: the showcase's own reads beside a traced operation. */
 export const untraced = <T>(fn: () => T): T => storage.exit(fn);
+
+/**
+ * Runs `fn` and reports the node its last command went to, without inspecting keys: for timing calls that are not
+ * responses (a failover drill's workload), where a full trace would add commands of its own.
+ */
+export async function lastNode<T>(fn: () => Promise<T>): Promise<{ outcome: PromiseSettledResult<T>; node: string | null }> {
+  const recording = { sent: new Map<Command, Sent>(), open: true };
+  const outcome = await storage.run(recording, () =>
+    fn().then(
+      (value): PromiseSettledResult<T> => ({ status: 'fulfilled', value }),
+      (reason: unknown): PromiseSettledResult<T> => ({ status: 'rejected', reason }),
+    ),
+  );
+  recording.open = false;
+  return { outcome, node: [...recording.sent.values()].at(-1)?.node ?? null };
+}

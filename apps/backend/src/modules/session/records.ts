@@ -34,6 +34,8 @@ export function userKeys(namespace: string, userId: string) {
     records: `${namespace}:session:${tag}:*`,
     sessionSet: `${namespace}:user-sessions:${tag}`,
     securityVersion: `${namespace}:security-version:${tag}`,
+    /** Every key of the user's: the records, the session set and the security version. */
+    all: `${namespace}:*${tag}*`,
   };
 }
 

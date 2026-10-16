@@ -2,7 +2,9 @@
 // /api/status, fetched by the page on the server).
 'use client';
 
-import { MODES, ServerEventSchema, type EventLogEntry, type HealthStatus, type Mode, type ModeStatus, type StatusResponse } from '@showcase/contracts';
+import {
+  MODES, ServerEventSchema, type EventLogEntry, type HealthStatus, type Mode, type ModeStatus, type SentinelStatus, type StatusResponse,
+} from '@showcase/contracts';
 import { useState } from 'react';
 import { useEventSource, type StreamState } from './use-event-source';
 
@@ -81,7 +83,9 @@ export function useLive(initial: StatusResponse | null) {
       stream === 'lost' || !modes ? unknownView(mode, 'backend not reachable') : toView(mode, modes.find((m) => m.mode === mode)),
     ]),
   ) as Record<Mode, ModeView>;
-  return { status, events, stream };
+  /** The sentinel status as the backend sent it, for the failover section's topology; null while unknown. */
+  const sentinel: SentinelStatus | null = stream === 'lost' ? null : modes?.find((m) => m.mode === 'sentinel')?.sentinel ?? null;
+  return { status, sentinel, events, stream };
 }
 
 export const formatLatency = (ms: number | null) => (ms === null ? '—' : `${ms < 10 ? ms.toFixed(1) : Math.round(ms)}ms`);

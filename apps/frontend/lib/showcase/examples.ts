@@ -523,8 +523,8 @@ export const OPS: Record<string, OpSpec> = {
       { name: 'pauseMs', label: 'pause (ms, unresponsive only)', kind: 'number' },
     ],
     examples: [
-      { id: 'graceful', title: 'Graceful failover', description: 'SENTINEL FAILOVER: the replica is promoted and the package carries on without a single error.', values: { kind: 'graceful', pauseMs: '' } },
-      { id: 'unresponsive', title: 'Unresponsive master', description: 'CLIENT PAUSE 8000 ALL on the master: calls stall, onError fires, and for ~10 s two nodes both think they are master.', values: { kind: 'unresponsive', pauseMs: 8000 } },
+      { id: 'graceful', title: 'Graceful failover', description: 'SENTINEL FAILOVER: the replica is promoted in ~1 s and no call fails or reaches onError. Pub/Sub delivers at most once, so a message or two published while the subscriber moves to the new master can be lost.', values: { kind: 'graceful', pauseMs: '' } },
+      { id: 'unresponsive', title: 'Unresponsive master', description: 'CLIENT PAUSE 8000 ALL on the master: calls stall for 2–3 s until Sentinel switches, then carry on against the new master without an error. Once the pause ends, the old master still says master for a while: watch the topology.', values: { kind: 'unresponsive', pauseMs: 8000 } },
     ],
     call: (v) => (v.kind === 'unresponsive'
       ? `CLIENT PAUSE ${v.pauseMs || 8000} ALL   // sent to the current master by the showcase, not the package`
