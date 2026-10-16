@@ -506,8 +506,8 @@ export const FailoverKindSchema = z.enum(['graceful', 'unresponsive']);
 export type FailoverKind = z.infer<typeof FailoverKindSchema>;
 export const FailoverTriggerRequestSchema = z.object({
   kind: FailoverKindSchema,
-  /** `unresponsive` only; 8000 when left out. */
-  pauseMs: z.number().int().min(1000).max(20_000).optional(),
+  /** `unresponsive` only; 8000 when left out. Sentinel marks a master down after ~1 s, so a shorter pause never fails over. */
+  pauseMs: z.number().int().min(3000).max(20_000).optional(),
 });
 /** What the trigger sent, where, and the reply. Not a package call: the package has no failover command. */
 export const FailoverTriggerResultSchema = z.object({
@@ -558,6 +558,8 @@ export const DrillEventSchema = z.discriminatedUnion('kind', [
   }),
   /** Something the sentinel mode client reported through `onError` while the drill ran. */
   z.object({ kind: z.literal('onError'), t: z.number(), source: z.string(), message: z.string() }),
+  /** Something the drill itself noticed: the stack not failover-ready again within the watch, so it checks anyway. */
+  z.object({ kind: z.literal('note'), t: z.number(), text: z.string() }),
   /** The drill could not go on (setup or the trigger failed); `end` follows. */
   z.object({ kind: z.literal('failed'), t: z.number(), message: z.string() }),
   /** What survived, then the stream ends. Empty checks when the drill failed before it could check. */

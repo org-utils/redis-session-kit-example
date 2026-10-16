@@ -15,6 +15,8 @@ export interface DrillRun {
   /** Every event so far, oldest first. */
   events: DrillEvent[];
   done: boolean;
+  /** The stream closed before `end`: what happened after its last event is unknown. */
+  lost?: boolean;
 }
 
 /** What Sentinel says about a data node, next to what the node says about itself (`ROLE`). */
@@ -69,6 +71,12 @@ export function useFailoverDrill(onResult: (r: RunResult) => void) {
       // The stream ends after `end`; closing first keeps the browser from reconnecting to replay it.
       if (event.kind === 'end') source.close();
       setRun((r) => r && { ...r, events: [...r.events, event], done: event.kind === 'end' });
+    };
+    // A reconnect the backend refuses (it restarted, or no longer keeps this drill) leaves the stream closed for good:
+    // the drill is over as far as this page can tell, with no checks to show.
+    source.onerror = () => {
+      if (source.readyState !== EventSource.CLOSED) return;
+      setRun((r) => r && !r.done ? { ...r, done: true, lost: true } : r);
     };
     return () => source.close();
   }, [id]);

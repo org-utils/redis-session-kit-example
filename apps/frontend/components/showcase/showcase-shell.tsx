@@ -21,7 +21,7 @@ import {
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { cn } from '@/lib/utils';
 import { spec, type Values } from '@/lib/showcase/examples';
-import { MODES, type Mode, type StatusResponse } from '@showcase/contracts';
+import { MODES, type EventLogEntry, type Mode, type StatusResponse } from '@showcase/contracts';
 import { runOperation, type RunResult } from '@/lib/showcase/api';
 import { MODE_ICON, MODULES, MODULE_ICON, modeText } from '@/lib/showcase/mock-backend';
 import { formatLatency, healthDot, healthText, useLive } from '@/lib/showcase/live';
@@ -35,6 +35,10 @@ import { RateLimitSection } from './rate-limit-section';
 import { SessionSection } from './session-section';
 import { SlotsSection } from './slots-section';
 import { StreamsSection } from './streams-section';
+
+const ENTRY_STYLE: Record<EventLogEntry['kind'], string> = {
+  error: 'text-destructive', health: 'text-warning', showcase: 'text-muted-foreground', sentinel: 'text-code-key',
+};
 
 export function ShowcaseShell({ initialStatus }: { initialStatus: StatusResponse | null }) {
   // ?module=<id> opens a section directly; the showcase opens on Session.
@@ -282,7 +286,7 @@ export function ShowcaseShell({ initialStatus }: { initialStatus: StatusResponse
                 {events.map((e) => (
                   <li key={e.id} className="flex gap-3 py-0.5">
                     <span className="text-muted-foreground">{new Date(e.ts).toLocaleTimeString()}</span><ModeName mode={e.mode} className="w-20" />
-                    <span className={e.kind === 'error' ? 'text-destructive' : e.kind === 'showcase' ? 'text-muted-foreground' : e.kind === 'sentinel' ? 'text-code-key' : 'text-warning'}>
+                    <span className={ENTRY_STYLE[e.kind]}>
                       {e.source}{e.channel && ` · ${e.channel}`}{e.code && ` · ${e.code}`}: {e.message}
                     </span>
                   </li>

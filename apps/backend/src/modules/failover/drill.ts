@@ -36,9 +36,6 @@ export interface DrillDeps {
 }
 
 const message = (error: unknown) => (error instanceof Error ? error.message : String(error));
-const kept = (label: string, detail: string): DrillCheck => ({ label, outcome: 'kept', detail });
-const lost = (label: string, detail: string): DrillCheck => ({ label, outcome: 'lost', detail });
-const unknown = (label: string, detail: string): DrillCheck => ({ label, outcome: 'unknown', detail });
 
 /** Starts a drill and returns it at once; it runs in the background. */
 export function startDrill(deps: DrillDeps): Drill {
@@ -129,9 +126,13 @@ async function run(
       }
     })();
     const deadline = Date.now() + WATCH_MS;
-    while (Date.now() < deadline) {
+    for (;;) {
       const status = sentinelStatus();
       if (status?.master && status.master !== from && status.failoverReady) break;
+      if (Date.now() >= deadline) {
+        emit({ kind: 'note', t: at(), text: `not failover-ready on a new master within ${WATCH_MS / 1000} s: checking anyway` });
+        break;
+      }
       await sleep(250);
     }
     stop = true;
@@ -139,19 +140,19 @@ async function run(
 
     // What survived.
     return [
-      await check('Lock', async () => {
+      await check('Lock', async ({ kept, lost }) => {
         const second = await lock.acquire(tag, LOCK_TTL);
         if (second.acquired) await lock.release(tag, second.token);
         const extended = await lock.extend(tag, lockToken, LOCK_TTL);
         return !second.acquired && extended
-          ? kept('Lock', 'still held: a second acquire was refused, and extend with the token returned true')
-          : lost('Lock', `${second.acquired ? 'a second caller acquired it' : 'a second acquire was refused'}; extend with the token → ${extended}`);
+          ? kept('still held: a second acquire was refused, and extend with the token returned true')
+          : lost(`${second.acquired ? 'a second caller acquired it' : 'a second acquire was refused'}; extend with the token → ${extended}`);
       }),
-      await check('Session', async () => {
+      await check('Session', async ({ kept, lost }) => {
         const result = await sessions.validate(sessionToken);
-        return result.valid ? kept('Session', 'validate → valid') : lost('Session', `validate → ${result.reason}`);
+        return result.valid ? kept('validate → valid') : lost(`validate → ${result.reason}`);
       }),
-      await check('Stream group', async () => {
+      await check('Stream group', async ({ kept, lost, unknown }) => {
         const entryId = await streams.add(tag, { check: 'after the failover' });
         const read = await Promise.race([blockedRead, sleep(CHECK_WAIT_MS).then(() => null)]);
         const got = read?.status === 'fulfilled' && read.value.some((e: StreamEntry) => e.id === entryId);
@@ -160,28 +161,30 @@ async function run(
           : read?.status === 'rejected' ? `the blocked read ended with "${message(read.reason)}"` : 'the blocked read was still waiting';
         try {
           await streams.read(tag, { group: 'billing', consumer: 'drill-check', id: '0', blockMs: 100 });
-          return kept('Stream group', `the group still exists; ${readDetail}`);
+          return kept(`the group still exists; ${readDetail}`);
         } catch (error) {
-          return /NOGROUP/.test(message(error)) ? lost('Stream group', `NOGROUP: the group is gone; ${readDetail}`) : unknown('Stream group', message(error));
+          return /NOGROUP/.test(message(error)) ? lost(`NOGROUP: the group is gone; ${readDetail}`) : unknown(message(error));
         }
       }),
-      await check('Subscription', async () => {
+      await check('Subscription', async ({ kept, lost, unknown }) => {
         await sleep(300); // the last messages may still be on their way
-        if (!published.size) return unknown('Subscription', 'no publish succeeded');
+        if (!published.size) return unknown('no publish succeeded');
         const missing = [...published].filter(([n]) => !received.has(n));
         const last = Math.max(...published.keys());
-        if (!missing.length) return kept('Subscription', `messages #1…#${last}: all ${published.size} published ones arrived, no gaps`);
+        if (!missing.length) return kept(`messages #1…#${last}: all ${published.size} published ones arrived, no gaps`);
         // Pub/Sub delivers at most once: a message published while the subscriber is moving to the new master is gone.
         const when = (t: number) => (switchedAt === null ? '' : ` at ${t >= switchedAt ? '+' : '−'}${(Math.abs(t - switchedAt) / 1000).toFixed(2)} s`);
-        const list = missing.slice(0, 5).map(([n, t]) => `#${n}${when(t)}`).join(', ');
-        return lost('Subscription', `${missing.length} of ${published.size} published messages never arrived: ${list}${missing.length > 5 ? ', …' : ''}${switchedAt === null ? '' : ' (relative to +switch-master)'}`);
+        // Messages are numbered in publish order, so the first and the last missing one bound when the rest were sent.
+        const named = ([n, t]: [number, number]) => `#${n}${when(t)}`;
+        const list = missing.length > 5 ? [...missing.slice(0, 4).map(named), '…', named(missing.at(-1)!)] : missing.map(named);
+        return lost(`${missing.length} of ${published.size} published messages never arrived: ${list.join(', ')}${switchedAt === null ? '' : ' (relative to +switch-master)'}`);
       }),
-      await check('Writes in the two-master window', async () => {
-        if (!staleWrites.length) return kept('Writes in the two-master window', 'none went to the old master');
+      await check('Writes in the two-master window', async ({ kept, lost }) => {
+        if (!staleWrites.length) return kept('none went to the old master');
         let gone = 0;
         for (const key of staleWrites) if (!(await cache.has(key))) gone++;
         const detail = `${staleWrites.length} ${staleWrites.length === 1 ? 'write' : 'writes'} answered OK by the old master after Sentinel switched away; ${gone} gone now`;
-        return gone ? lost('Writes in the two-master window', detail) : kept('Writes in the two-master window', detail);
+        return gone ? lost(detail) : kept(detail);
       }),
     ];
   } catch (error) {
@@ -198,12 +201,16 @@ async function run(
   }
 }
 
-/** Runs one check; one that throws reads as unknown, with why. */
-async function check(label: string, fn: () => Promise<DrillCheck>): Promise<DrillCheck> {
+type Verdicts = Record<DrillCheck['outcome'], (detail: string) => DrillCheck>;
+
+/** Runs one check, handing it a verdict per outcome under its label; one that throws reads as unknown, with why. */
+async function check(label: string, fn: (verdicts: Verdicts) => Promise<DrillCheck>): Promise<DrillCheck> {
+  const verdict = (outcome: DrillCheck['outcome']) => (detail: string): DrillCheck => ({ label, outcome, detail });
+  const verdicts: Verdicts = { kept: verdict('kept'), lost: verdict('lost'), unknown: verdict('unknown') };
   try {
-    return await fn();
+    return await fn(verdicts);
   } catch (error) {
-    return unknown(label, message(error));
+    return verdicts.unknown(message(error));
   }
 }
 

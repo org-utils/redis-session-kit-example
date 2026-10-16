@@ -79,12 +79,12 @@ function ChecksList({ checks }: { checks: DrillCheck[] }) {
 
 const KIND_STYLE: Record<DrillEvent['kind'], string> = {
   setup: 'text-muted-foreground', trigger: 'text-mode-sentinel font-medium', call: 'text-foreground', sentinel: 'text-code-key',
-  onError: 'text-destructive', failed: 'text-destructive font-medium', end: 'text-muted-foreground',
+  onError: 'text-destructive', note: 'text-warning', failed: 'text-destructive font-medium', end: 'text-muted-foreground',
 };
 
 function eventText(e: DrillEvent) {
   switch (e.kind) {
-    case 'setup': case 'trigger': return e.text;
+    case 'setup': case 'trigger': case 'note': return e.text;
     case 'sentinel': return `${e.channel} ${e.message}`;
     case 'call': return `${e.op}() → ${e.node ?? '?'} · ${e.latencyMs}ms${e.stale ? ' · old master' : ''}${e.error ? ` · ${e.error}` : ''}`;
     case 'onError': return `${e.source}: ${e.message}`;
@@ -108,7 +108,8 @@ export function FailoverSection({ sentinel, onResult }: { sentinel: SentinelStat
   const d = useFailoverDrill(onResult);
   const [show, setShow] = useState<string[]>(KINDS);
   const events = d.run?.events ?? [];
-  const shown = events.filter((e) => e.kind === 'failed' || show.includes(e.kind));
+  // What ends or bends the drill (a note, a failure) shows whatever the filter.
+  const shown = events.filter((e) => e.kind === 'note' || e.kind === 'failed' || show.includes(e.kind));
   const end = events.find((e) => e.kind === 'end');
   const nodes = nodeViews(sentinel);
   return (
@@ -142,6 +143,7 @@ export function FailoverSection({ sentinel, onResult }: { sentinel: SentinelStat
         </CardHeader>
         <CardContent>
           <ScrollArea className="h-72"><ul>{shown.map((e, i) => <EventLine key={i} e={e} />).reverse()}</ul></ScrollArea>
+          {d.run?.lost && <p className="text-sm text-destructive">Lost the drill’s stream before it ended (the backend restarted, or no longer keeps this drill).</p>}
           {!d.run && <p className="text-sm text-muted-foreground">Run a drill to see every call, Sentinel announcement and onError event as it happens.</p>}
         </CardContent>
       </Card>

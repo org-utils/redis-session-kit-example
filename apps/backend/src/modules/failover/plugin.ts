@@ -4,6 +4,7 @@ import { randomBytes } from 'node:crypto';
 import {
   DrillParamsSchema, FailoverTriggerRequestSchema, type DrillEvent, type FailoverKind, type FailoverTriggerResult,
 } from '@showcase/contracts';
+import type { Redis } from 'ioredis';
 import type { ModeSpecificModule } from '../../app.ts';
 import { ShowcaseError } from '../../http/errors.ts';
 import { sseStreams } from '../../http/sse.ts';
@@ -22,11 +23,14 @@ export const failoverModule: ModeSpecificModule = async (app, { client, events, 
   const sentinelStatus = () => monitor.snapshot().find((m) => m.mode === 'sentinel')?.sentinel;
 
   // The status is checked every 2 s, so right after a trigger it still says ready. Until a check shows the new master
-  // and the replica back in sync, a trigger counts as still settling.
-  let settling: { from: string; until: number } | null = null;
+  // and the replica back in sync, a trigger counts as still settling. `from` is null until the trigger has asked
+  // Sentinel for the master it moves away from.
+  let settling: { from: string | null; until: number } | null = null;
+  /** Failover-ready and nothing settling; a trigger that has settled stops counting as one. */
   const ready = () => {
     const status = sentinelStatus();
-    if (settling && (Date.now() > settling.until || (status?.master !== settling.from && status?.failoverReady))) settling = null;
+    const settled = settling?.from && status?.master !== settling.from && status?.failoverReady;
+    if (settling && (Date.now() > settling.until || settled)) settling = null;
     return !settling && !!status?.failoverReady;
   };
 
@@ -35,19 +39,25 @@ export const failoverModule: ModeSpecificModule = async (app, { client, events, 
 
   /** Refuses unless the stack can fail over now: no drill running, and failover-ready. */
   function assertReady() {
-    if (running()) throw new ShowcaseError(409, 'DRILL_IN_PROGRESS', 'A failover drill is running: one at a time');
+    if (running()) throw new ShowcaseError('DRILL_IN_PROGRESS', 'A failover drill is running: one at a time');
     if (!ready()) {
-      throw new ShowcaseError(409, 'FAILOVER_NOT_READY', 'Not failover-ready: the replica is not back in sync with the master yet');
+      throw new ShowcaseError('FAILOVER_NOT_READY', 'Not failover-ready: the replica is not back in sync with the master yet');
     }
   }
 
   /** Sends the failover and returns what was sent where; the gate stays shut until it has settled. */
   async function trigger(kind: FailoverKind, pauseMs = DEFAULT_PAUSE_MS): Promise<FailoverTriggerResult> {
-    const { redis: sentinel, address } = await firstReachable(config.REDIS_SENTINELS);
+    // The gate shuts before the first await, so a second request meanwhile is refused instead of failing over again.
+    const mine: { from: string | null; until: number } = { from: null, until: Date.now() + SETTLE_TIMEOUT_MS };
+    settling = mine;
+    let sentinel: Redis | undefined;
     try {
+      const reached = await firstReachable(config.REDIS_SENTINELS);
+      sentinel = reached.redis;
+      const address = reached.address;
       const [host, port] = (await sentinel.call('SENTINEL', 'GET-MASTER-ADDR-BY-NAME', name)) as [string, string];
       const from = `${host}:${port}`;
-      settling = { from, until: Date.now() + SETTLE_TIMEOUT_MS };
+      mine.from = from;
       if (kind === 'graceful') {
         const reply = String(await sentinel.call('SENTINEL', 'FAILOVER', name));
         return { kind, command: `SENTINEL FAILOVER ${name}`, sentTo: address, reply, from };
@@ -61,10 +71,10 @@ export const failoverModule: ModeSpecificModule = async (app, { client, events, 
         master.disconnect();
       }
     } catch (error) {
-      settling = null;
+      if (settling === mine) settling = null;
       throw error;
     } finally {
-      sentinel.disconnect();
+      sentinel?.disconnect();
     }
   }
 
@@ -87,7 +97,7 @@ export const failoverModule: ModeSpecificModule = async (app, { client, events, 
   const openStream = sseStreams(app);
   app.get('/drills/:id/stream', { schema: { params: DrillParamsSchema } }, (request, reply) => {
     const drill = drills.get(request.params.id);
-    if (!drill) throw new ShowcaseError(404, 'DRILL_NOT_FOUND', `No drill ${request.params.id} (only the last ${DRILLS_KEPT} are kept)`);
+    if (!drill) throw new ShowcaseError('DRILL_NOT_FOUND', `No drill ${request.params.id} (only the last ${DRILLS_KEPT} are kept)`);
     const stream = openStream<DrillEvent>(request, reply);
     const send = (event: DrillEvent) => {
       stream.send(event);

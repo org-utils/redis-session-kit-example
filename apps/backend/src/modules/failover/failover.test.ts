@@ -32,12 +32,15 @@ async function readyAgain(timeoutMs = 60_000) {
 
 const trigger = (body: object) => app.inject({ method: 'POST', url: '/api/sentinel/failover/trigger', payload: body });
 
-test('a plain graceful failover moves the master; asking again before the replica is back answers FAILOVER_NOT_READY', async () => {
+test('a plain graceful failover moves the master; asking at once or again before the replica is back answers FAILOVER_NOT_READY', async () => {
   const started = Date.now();
   const { master: from } = await sentinelStatus();
 
-  const res = await trigger({ kind: 'graceful' });
+  // Two at once: the first shuts the gate before it reaches Sentinel, so the second is refused rather than failing over
+  // straight back.
+  const [res, raced] = (await Promise.all([trigger({ kind: 'graceful' }), trigger({ kind: 'graceful' })])).sort((a, b) => a.statusCode - b.statusCode);
   assert.equal(res.statusCode, 200, res.body);
+  assert.deepEqual([raced.statusCode, raced.json().error.code], [409, 'FAILOVER_NOT_READY']);
   const { result, redis } = res.json();
   assert.deepEqual([result.command, result.reply, result.sentTo], ['SENTINEL FAILOVER mymaster', 'OK', '127.0.0.1:26379']);
   assert.deepEqual(
