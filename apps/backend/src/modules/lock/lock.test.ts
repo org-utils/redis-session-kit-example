@@ -34,7 +34,8 @@ for (const mode of MODES) {
       assert.equal(b.body.result.acquired, false);
       assert.equal(typeof b.body.result.token, 'string');
       assert.notEqual(a.body.result.token, b.body.result.token);
-      assert.deepEqual(a.body.redis.commands.map((c: { name: string }) => c.name), ['set']);
+      // One script since 2.0.1, so an acquire ioredis resends still counts as acquired: EVAL follows only while Redis lacks the script.
+      assert.match(a.body.redis.commands.map((c: { name: string }) => c.name).join(' '), /^evalsha( eval)?$/);
     });
 
     test('the lease is read from Redis: the stored token and the key’s remaining TTL', async () => {
