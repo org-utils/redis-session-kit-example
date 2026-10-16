@@ -30,7 +30,7 @@ Each section runs real package calls on the connection mode you pick in the side
 | [Rate limit](http://localhost:3000/?module=rate-limit) | Atomic fixed-window counters | [`modules/rate-limit`](apps/backend/src/modules/rate-limit/) |
 | [Pub/Sub](http://localhost:3000/?module=pubsub) | JSON fan-out over a dedicated subscriber | [`modules/pubsub`](apps/backend/src/modules/pubsub/) |
 | [Streams](http://localhost:3000/?module=streams) | Append, consumer groups, reads, acks | [`modules/streams`](apps/backend/src/modules/streams/) |
-| [Failover](http://localhost:3000/?module=failover) (sentinel only) | A failover drill: move the master 6380 → 6381 while a workload runs, then check what survived | [`modules/failover`](apps/backend/src/modules/failover/) |
+| [Failover](http://localhost:3000/?module=failover) (sentinel only) | A failover drill: Sentinel promotes the replica while a workload runs, then the showcase checks what survived | [`modules/failover`](apps/backend/src/modules/failover/) |
 | [Slots](http://localhost:3000/?module=slots) (cluster only) | Key → hash slot → node, hash tags, cluster-aware fan-out | [`modules/slots`](apps/backend/src/modules/slots/) |
 
 ### Five-minute tour
@@ -38,7 +38,7 @@ Each section runs real package calls on the connection mode you pick in the side
 1. [**Session**](http://localhost:3000/?module=session): on `create`, run **Log in on a laptop**. On `rotate`, run **Rotate after privilege change**, then **Replay the old token**: the consumed predecessor is refused with `SessionReplayError` (401), and its successor stays active.
 2. [**Failover**](http://localhost:3000/?module=failover): pick **Graceful failover** and **Run drill**. Sentinel promotes the replica in about a second, and no call fails or reaches `onError`.
 3. [**Slots**](http://localhost:3000/?module=slots): compare **Related keys, no hash tag**, which scatter across slots and nodes, with **Same keys with a hash tag**, which share one slot.
-4. [**Rate limit**](http://localhost:3000/?module=rate-limit): on `burst`, run **Fill the window**: 15 consumes, 10 allowed and 5 denied with `retryAfterSeconds`.
+4. [**Rate limit**](http://localhost:3000/?module=rate-limit): on `burst`, run **Fill the window**: from an empty window, 15 consumes, 10 allowed and 5 denied with `retryAfterSeconds`.
 
 ## URLs and ports
 
@@ -61,7 +61,7 @@ Run from the repo root.
 - `pnpm redis:<mode>`: `redis-cli` inside that mode's stack, e.g. `pnpm redis:cluster GET showcase:cache:a`.
 - `pnpm test`, `pnpm typecheck`: the backend tests (against the running infra) and the typecheck of every package.
 
-To start over, `pnpm infra:down` wipes every mode; each section's **Reset section** button deletes just its own keys. [`infra/README.md`](infra/README.md) has the details.
+To start over, `pnpm infra:down` wipes every mode; the **Reset section** button on a section that writes keys deletes just that section's keys. [`infra/README.md`](infra/README.md) has the details.
 
 ## Configuration
 

@@ -60,9 +60,9 @@ export const MODULES: ShowcaseModule[] = [
     ops: [{ id: 'inspect', label: 'key inspector' }] },
 ];
 
-/** A module's backend plugin folder on GitHub (`main`), which the section header links as Source. */
-export const sourceUrl = (moduleId: string) =>
-  `https://github.com/org-utils/redis-session-kit-example/tree/main/apps/backend/src/modules/${moduleId}`;
+/** A module's backend folder on GitHub (`main`), which the section header links as Source. */
+export const sourceUrl = (mod: ShowcaseModule) =>
+  `https://github.com/org-utils/redis-session-kit-example/tree/main/apps/backend/src/modules/${mod.id}`;
 
 export const modeText: Record<Mode, string> = {
   standalone: 'text-mode-standalone', sentinel: 'text-mode-sentinel', cluster: 'text-mode-cluster',

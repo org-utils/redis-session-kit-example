@@ -2,7 +2,7 @@
 // opt-in compare across modes, a right-hand Redis-state panel and one collapsible event log for all modes.
 'use client';
 
-import { ChevronsUpDown, Code, Database, Eraser, Play } from 'lucide-react';
+import { ChevronsUpDown, Database, Eraser, ExternalLink, Play } from 'lucide-react';
 import { useSearchParams } from 'next/navigation';
 import { useState } from 'react';
 import { ThemeToggle } from '@/components/theme-toggle';
@@ -183,7 +183,7 @@ export function ShowcaseShell({ initialStatus }: { initialStatus: StatusResponse
                   <div className="flex items-baseline gap-3">
                     <h1 className="text-2xl font-semibold tracking-tight">{mod.label}</h1>
                     <Button variant="link" size="xs" className="h-auto px-0 text-muted-foreground" asChild>
-                      <a href={sourceUrl(mod.id)} target="_blank" rel="noreferrer"><Code /> Source</a>
+                      <a href={sourceUrl(mod)} target="_blank" rel="noreferrer">Source <ExternalLink /></a>
                     </Button>
                   </div>
                   <p className="text-sm text-muted-foreground">{mod.blurb}</p>
